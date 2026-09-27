@@ -47,14 +47,15 @@ export class FacebookGraphClient {
 
   private async request(
     endpoint: string,
-    params: Record<string, string>
+    params: Record<string, string>,
+    method: string = "POST"
   ): Promise<any> {
     // Append the access token to every request
     const allParams = { ...params, access_token: this.config.pageAccessToken };
     const queryString = new URLSearchParams(allParams).toString();
     const url = `${BASE_URL}/${endpoint}?${queryString}`;
 
-    const response = await fetch(url, { method: "POST" });
+    const response = await fetch(url, { method });
 
     if (!response.ok) {
       const errorBody = await response.text();
@@ -140,7 +141,7 @@ export class FacebookGraphClient {
 
   async verifyPageAccess(): Promise<boolean> {
     try {
-      const data = await this.request(this.config.pageId, { fields: "name,access_token" });
+      const data = await this.request(this.config.pageId, { fields: "name,access_token" }, "GET");
       return !!data.name;
     } catch (err: any) {
       throw new Error(`Facebook verification failed: ${err.message}`);
