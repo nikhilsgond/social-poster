@@ -1,0 +1,1 @@
+-- Supabase posts table will be created in the next setup step.

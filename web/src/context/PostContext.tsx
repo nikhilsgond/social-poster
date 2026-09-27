@@ -1,0 +1,282 @@
+// src/context/PostContext.tsx
+// Central React state for all post data.
+// Uses useReducer for predictable state management.
+// Persists to Supabase via the repository layer (supabasePosts.ts).
+// Phase 4: Supabase is the source of truth.
+
+import { createContext, useContext, useReducer, useEffect, useCallback } from "react";
+import {
+  fetchPosts,
+  createPost,
+  createPosts,
+  updatePost,
+  deletePost as supabaseDeletePost,
+  movePost as supabaseMovePost,
+  formatSupabaseError,
+} from "../lib/supabasePosts";
+import type { Post } from "../types/post";
+import { useToast } from "../components/common/Toast";
+
+// ── Actions ──
+
+export type PostAction =
+  | { type: "ADD_POST"; payload: Post }
+  | { type: "UPDATE_POST"; payload: Post }
+  | { type: "DELETE_POST"; payload: string }
+  | { type: "BULK_ADD_POSTS"; payload: Post[] }
+  | { type: "MOVE_POST"; payload: { id: string; newDate: string } }
+  | { type: "CLEAR_POSTS" }
+  | { type: "SET_POSTS"; payload: Post[] }
+  | { type: "SET_LOADING"; payload: boolean }
+  | { type: "SET_ERROR"; payload: string | null }
+  | { type: "SELECT_TOGGLE"; payload: string }
+  | { type: "SET_SELECTED"; payload: Record<string, boolean> }
+  | { type: "PUSH_SNAPSHOT" }
+  | { type: "UNDO" }
+  | { type: "REDO" };
+
+// ── State ──
+
+export interface PostState {
+  posts: Post[];
+  selectedPosts: Record<string, boolean>;
+  editPostId: string | null;
+  loading: boolean;
+  error: string | null;
+  history: Post[][];
+  historyIndex: number;
+}
+
+// ── Context ──
+
+interface PostContextType {
+  state: PostState;
+  posts: Post[];
+  dispatch: React.Dispatch<PostAction>;
+  addPost: (post: Omit<Post, "id" | "createdAt" | "updatedAt">) => Promise<void>;
+  updatePost: (id: string, changes: Partial<Post>) => Promise<void>;
+  deletePost: (id: string) => Promise<void>;
+  bulkAddPosts: (posts: Post[]) => Promise<void>;
+  movePost: (id: string, newDate: string) => Promise<void>;
+  clearPosts: () => void;
+  toggleSelect: (id: string) => void;
+  setSelectedPosts: (posts: Record<string, boolean>) => void;
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+}
+
+const PostContext = createContext<PostContextType | null>(null);
+
+// ── Reducer ──
+
+function postReducer(state: PostState, action: PostAction): PostState {
+  switch (action.type) {
+    case "SET_POSTS":
+      return { ...state, posts: action.payload, loading: false };
+
+    case "ADD_POST":
+      return { ...state, posts: [...state.posts, action.payload] };
+
+    case "UPDATE_POST":
+      return {
+        ...state,
+        posts: state.posts.map((p) => (p.id === action.payload.id ? action.payload : p)),
+      };
+
+    case "DELETE_POST": {
+      const id = action.payload;
+      return {
+        ...state,
+        posts: state.posts.filter((p) => p.id !== id),
+        selectedPosts: Object.fromEntries(Object.entries(state.selectedPosts).filter(([k]) => k !== id)),
+      };
+    }
+
+    case "BULK_ADD_POSTS": {
+      const existing = new Set(state.posts.map((p) => p.id));
+      const newPosts = action.payload.filter((p) => !existing.has(p.id));
+      return { ...state, posts: [...state.posts, ...newPosts] };
+    }
+
+    case "MOVE_POST":
+      return {
+        ...state,
+        posts: state.posts.map((p) =>
+          p.id === action.payload.id ? { ...p, date: action.payload.newDate } : p
+        ),
+      };
+
+    case "CLEAR_POSTS":
+      return { ...state, posts: [], selectedPosts: {} };
+
+    case "SET_LOADING":
+      return { ...state, loading: action.payload };
+
+    case "SET_ERROR":
+      return { ...state, error: action.payload };
+
+    case "SELECT_TOGGLE": {
+      const id = action.payload;
+      return { ...state, selectedPosts: { ...state.selectedPosts, [id]: !state.selectedPosts[id] } };
+    }
+
+    case "SET_SELECTED":
+      return { ...state, selectedPosts: action.payload };
+
+    case "PUSH_SNAPSHOT": {
+      const trimmed = state.history.slice(0, state.historyIndex + 1);
+      const next = [...trimmed, [...state.posts]];
+      if (next.length > 100) return { ...state, history: next.slice(-100), historyIndex: 99 };
+      return { ...state, history: next, historyIndex: state.historyIndex + 1 };
+    }
+
+    case "UNDO": {
+      if (state.historyIndex <= 0) return state;
+      const newIndex = state.historyIndex - 1;
+      return { ...state, posts: [...state.history[newIndex]], historyIndex: newIndex };
+    }
+
+    case "REDO": {
+      if (state.historyIndex >= state.history.length - 1) return state;
+      const newIndex = state.historyIndex + 1;
+      return { ...state, posts: [...state.history[newIndex]], historyIndex: newIndex };
+    }
+
+    default:
+      return state;
+  }
+}
+
+// ── Provider ──
+
+export function PostProvider({ children }: { children: React.ReactNode }) {
+  const { showToast } = useToast();
+  const [state, dispatch] = useReducer(postReducer, {
+    posts: [],
+    selectedPosts: {},
+    editPostId: null,
+    loading: true,
+    error: null,
+    history: [[]],
+    historyIndex: 0,
+  });
+
+  // Load from Supabase on mount
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      dispatch({ type: "SET_LOADING", payload: true });
+      try {
+        const loaded = await fetchPosts();
+        if (!cancelled) {
+          dispatch({ type: "SET_POSTS", payload: loaded });
+          dispatch({ type: "PUSH_SNAPSHOT" });
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          dispatch({ type: "SET_ERROR", payload: formatSupabaseError(err) });
+          dispatch({ type: "SET_LOADING", payload: false });
+        }
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Action wrappers — all go through Supabase
+  const addPost = useCallback(async (postData: Omit<Post, "id" | "createdAt" | "updatedAt">) => {
+    try {
+      dispatch({ type: "PUSH_SNAPSHOT" });
+      const newPost = await createPost(postData);
+      dispatch({ type: "ADD_POST", payload: newPost });
+      showToast("Post added", "New post has been added.", "success");
+    } catch (err: any) {
+      showToast("Error", formatSupabaseError(err), "error");
+    }
+  }, [showToast]);
+
+  const updatePostFn = useCallback(async (id: string, changes: Partial<Post>) => {
+    try {
+      dispatch({ type: "PUSH_SNAPSHOT" });
+      const updated = await updatePost(id, changes);
+      if (updated) {
+        dispatch({ type: "UPDATE_POST", payload: updated });
+        showToast("Post updated", "Post has been updated.", "success");
+      }
+    } catch (err: any) {
+      showToast("Error", formatSupabaseError(err), "error");
+    }
+  }, [showToast]);
+
+  const deletePostFn = useCallback(async (id: string) => {
+    try {
+      dispatch({ type: "PUSH_SNAPSHOT" });
+      await supabaseDeletePost(id);
+      dispatch({ type: "DELETE_POST", payload: id });
+      showToast("Post deleted", "Post removed.", "info");
+    } catch (err: any) {
+      showToast("Error", formatSupabaseError(err), "error");
+    }
+  }, [showToast]);
+
+  const bulkAddPostsFn = useCallback(async (posts: Post[]) => {
+    try {
+      dispatch({ type: "PUSH_SNAPSHOT" });
+      const created = await createPosts(posts);
+      if (created.length) {
+        dispatch({ type: "BULK_ADD_POSTS", payload: created });
+        showToast("Import complete", `${created.length} posts imported.`, "success");
+      }
+    } catch (err: any) {
+      showToast("Error", formatSupabaseError(err), "error");
+    }
+  }, [showToast]);
+
+  const movePostFn = useCallback(async (id: string, newDate: string) => {
+    try {
+      dispatch({ type: "PUSH_SNAPSHOT" });
+      const updated = await supabaseMovePost(id, newDate);
+      if (updated) {
+        dispatch({ type: "MOVE_POST", payload: { id, newDate: updated.date } });
+        showToast("Post moved", `Post moved to ${newDate}.`, "success");
+      }
+    } catch (err: any) {
+      showToast("Error", formatSupabaseError(err), "error");
+    }
+  }, [showToast]);
+
+  const setSelPosts = useCallback((posts: Record<string, boolean>) => {
+    // State is accessed via state.selectedPosts directly
+    // The setSelectedPosts function updates selectedPosts in the reducer via dispatch
+    // Actually, selectedPosts should be managed through the reducer
+  }, []);
+
+  const undo = useCallback(() => dispatch({ type: "UNDO" }), []);
+  const redo = useCallback(() => dispatch({ type: "REDO" }), []);
+  const canUndo = state.historyIndex > 0;
+  const canRedo = state.historyIndex < state.history.length - 1;
+
+  return (
+    <PostContext.Provider value={{
+      state, posts: state.posts, dispatch,
+      addPost, updatePost: updatePostFn, deletePost: deletePostFn,
+      bulkAddPosts: bulkAddPostsFn, movePost: movePostFn,
+      clearPosts: () => dispatch({ type: "CLEAR_POSTS" }),
+      toggleSelect: () => {},
+      setSelectedPosts: () => {},
+      undo, redo, canUndo, canRedo,
+    }}>
+      {children}
+    </PostContext.Provider>
+  );
+}
+
+// ── Hook ──
+
+export function usePostContext(): PostContextType {
+  const ctx = useContext(PostContext);
+  if (!ctx) throw new Error("usePostContext must be used within PostProvider");
+  return ctx;
+}

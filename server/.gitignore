@@ -1,0 +1,10 @@
+# Server git ignore
+node_modules/
+dist/
+*.js
+.env
+.env.local
+.env.production
+*.pem
+*.key
+.env.*.local

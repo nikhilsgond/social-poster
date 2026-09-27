@@ -1,0 +1,11 @@
+{
+  "name": "social-poster",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "web": "npm --prefix web run dev",
+    "web:build": "npm --prefix web run build",
+    "server": "npm --prefix server run dev",
+    "server:publish": "npm --prefix server run publish"
+  }
+}

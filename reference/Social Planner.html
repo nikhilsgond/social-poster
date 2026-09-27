@@ -1,0 +1,1838 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Social Planner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box;}
+
+  /* Minimal dark scrollbars everywhere — keep scrolling without the browser-default look. */
+  *{
+    scrollbar-width:thin;
+    scrollbar-color:#3a3a3a transparent;
+  }
+  *::-webkit-scrollbar{width:6px;height:6px;}
+  *::-webkit-scrollbar-track{background:transparent;}
+  *::-webkit-scrollbar-thumb{
+    background:#3a3a3a;
+    border-radius:999px;
+    border:1px solid transparent;
+    background-clip:padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover{background:#505050;}
+  *::-webkit-scrollbar-corner{background:transparent;}
+
+  html,body{height:100%;}
+  body{
+    margin:0;
+    font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    background:var(--bg);
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+    padding-top:env(safe-area-inset-top,0px);
+    padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  html{ scroll-padding-top: env(safe-area-inset-top,0px); }
+  button,input,select,textarea{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}
+
+  :root{
+    --bg:#FFFFFF;
+    --panel:#FFFFFF;
+    --panel-alt:#F4F4F4;
+    --border:#E2E2E2;
+    --ink:#111111;
+    --muted:#6E6E6E;
+    --shadow:0 1px 2px rgba(0,0,0,0.06);
+  }
+
+
+  *:focus-visible{ outline:2px solid var(--ink); outline-offset:2px; }
+
+  .app{ display:flex; flex-direction:column; height:100vh; height:100dvh; }
+
+  .topbar{
+    position:relative; z-index:1000;
+    display:flex; align-items:center; gap:14px; padding:14px 26px; border-bottom:1px solid var(--border);
+    background:var(--panel); flex-wrap:wrap; box-shadow:0 1px 0 rgba(0,0,0,.03);
+  }
+  .brand{ font-weight:800; font-size:1.2rem; letter-spacing:-0.025em; margin-right:4px; }
+  .brand-sub{font-size:.72rem;color:var(--muted);font-weight:500;padding-left:4px;border-left:1px solid var(--border);}
+  .toolbar-actions{display:flex;gap:7px;margin-left:auto;align-items:center;}
+  .btn-import{ background:var(--panel); border:1px solid var(--border); color:var(--ink); padding:9px 14px; border-radius:7px; font:inherit; font-weight:600; cursor:pointer; font-size:.82rem;}
+  .btn-import:hover{background:var(--panel-alt);border-color:#B8B8B8;}
+  .btn-primary{box-shadow:0 1px 2px rgba(0,0,0,.08);}
+  .bulk-summary{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;}
+  .bulk-stat{padding:7px 10px;border:1px solid var(--border);border-radius:7px;background:var(--panel-alt);font-size:.75rem;color:var(--muted);}
+  .bulk-stat strong{color:var(--ink);}
+  .bulk-errors{border:1px solid #D9D9D9;background:var(--panel-alt);border-radius:8px;padding:10px 12px;max-height:190px;overflow:auto;font-size:.78rem;}
+  .bulk-errors .error{padding:5px 0;border-bottom:1px solid var(--border);}
+  .bulk-errors .error:last-child{border-bottom:none;}
+  .bulk-ok{border:1px solid var(--border);background:var(--panel-alt);border-radius:8px;padding:10px 12px;font-size:.78rem;}
+  .json-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.7rem;line-height:1.55;background:var(--panel-alt);border:1px solid var(--border);border-radius:8px;padding:10px;white-space:pre-wrap;overflow:auto;}
+  .file-drop{border:1px dashed var(--border);border-radius:9px;padding:18px;text-align:center;background:var(--panel-alt);cursor:pointer;}
+  .file-drop:hover{border-color:var(--ink);}
+  .file-drop input{display:none;}
+  .file-drop strong{display:block;font-size:.85rem;margin-bottom:4px;}
+  .file-drop span{font-size:.74rem;color:var(--muted);}
+  .month-nav{ display:flex; align-items:center; gap:8px; }
+  .month-nav button{ border:1px solid var(--border); background:var(--panel); color:var(--ink); padding:7px 14px; border-radius:6px; font:inherit; font-weight:500; cursor:pointer; font-size:0.83rem; }
+  .month-nav button:hover{ background:var(--panel-alt); }
+  .month-label{ font-weight:700; font-size:1rem; min-width:150px; text-align:center; }
+  .view-nav{ display:flex; gap:6px; margin-left:auto; }
+  .view-nav button{ border:1px solid var(--border); background:var(--panel); color:var(--muted); padding:8px 16px; border-radius:6px; font:inherit; font-weight:500; cursor:pointer; font-size:0.83rem; }
+  .view-nav button.active{ background:var(--ink); color:var(--bg); border-color:var(--ink); }
+  .btn-primary{ background:var(--ink); color:var(--bg); border:1px solid var(--ink); padding:9px 18px; border-radius:6px; font:inherit; font-weight:600; cursor:pointer; font-size:0.83rem; }
+  .btn-primary:hover{ opacity:0.85; }
+  .btn-secondary{ background:var(--panel); border:1px solid var(--border); color:var(--ink); padding:9px 16px; border-radius:6px; font:inherit; cursor:pointer; font-size:0.83rem; }
+  .btn-secondary:hover{ background:var(--panel-alt); }
+  .btn-danger{ background:var(--panel); border:1px solid var(--ink); color:var(--ink); padding:9px 16px; border-radius:6px; font:inherit; cursor:pointer; font-size:0.83rem; }
+  .btn-danger:hover{ background:var(--ink); color:var(--bg); }
+
+  main#mainArea{ flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; scrollbar-gutter:stable; padding:18px 26px 24px; display:flex; }
+  .view-panel{ flex:1; min-height:0; display:flex; flex-direction:column; max-width:1280px; width:100%; margin:0 auto; }
+  .hidden{ display:none !important; }
+
+  .hint-bar{ background:var(--panel-alt); border:1px dashed var(--border); border-radius:7px; padding:8px 12px; font-size:0.78rem; color:var(--muted); margin-bottom:10px; max-width:1180px; width:100%; margin-left:auto; margin-right:auto; }
+
+  /* Calendar */
+  .cal-weekdays{ display:grid; grid-template-columns:repeat(7,1fr); max-width:1180px; width:100%; margin:0 auto; }
+  .cal-weekday{ text-align:center; font-size:0.74rem; color:var(--muted); padding:6px 0; font-weight:600; }
+  .cal-grid{ position:relative; z-index:2; flex:none; height:clamp(480px,calc(100dvh - 190px),820px); min-height:480px; max-height:820px; display:grid; grid-template-columns:repeat(7,1fr); gap:1px; background:var(--border); border:1px solid var(--border); border-radius:10px; overflow:visible; max-width:1180px; width:100%; margin:0 auto; }
+  .cal-cell{ background:var(--panel); padding:10px; display:flex; flex-direction:column; min-height:0; overflow:visible; position:relative; cursor:pointer; z-index:1; }
+.cal-cell.cal-cell-open{ z-index:20; }
+  /* Keep the cell that owns an open/hovered preview above every neighboring calendar cell. */
+  .cal-cell.cal-cell-preview-open{ z-index:1000 !important; }
+  .cal-cell:hover{ background:var(--panel-alt); }
+  .cal-cell-dim{ background:var(--panel-alt); opacity:0.5; }
+  .cal-cell-today{ box-shadow: inset 0 0 0 2px var(--ink); }
+  .cal-cell-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; flex-shrink:0; }
+  .cal-cell-num{ font-size:0.76rem; font-weight:700; color:var(--ink); }
+  .cal-chip-list{ display:flex; flex-direction:column; gap:4px; overflow:visible; flex:1; min-height:0; }
+  .cal-platform-group{ position:relative; }
+  .cal-platform-btn{ width:100%; border:1px solid var(--border); border-radius:7px; background:var(--panel); color:var(--ink); font-size:.67rem; font-weight:650; padding:5px 7px; text-align:left; cursor:pointer; font-family:inherit; display:flex; gap:6px; align-items:center; transition:transform .16s ease,box-shadow .16s ease,border-color .16s ease; }
+  .cal-platform-btn:hover,.cal-platform-group.open .cal-platform-btn{ transform:translateY(-1px); border-color:var(--ink); box-shadow:0 6px 16px rgba(0,0,0,.09); }
+  .platform-icon{ width:18px; height:18px; border-radius:5px; display:inline-flex; align-items:center; justify-content:center; flex:0 0 18px; }
+  .platform-icon svg{ width:12px; height:12px; display:block; color:#FFFFFF; }
+  .platform-count{ margin-left:auto; font-variant-numeric:tabular-nums; font-weight:800; }
+  .cal-preview{ position:fixed !important; left:0; top:0; width:270px; max-height:360px; overflow:auto; max-width:min(270px,calc(100vw - 28px)); background:var(--panel); border:1px solid var(--border); border-radius:10px; box-shadow:0 14px 35px rgba(0,0,0,.16); padding:7px; z-index:2147483647 !important; display:none; animation:previewIn .15s ease both; }
+  /* Preview uses the same minimal dark scrollbar. */
+  .cal-preview{scrollbar-width:thin;scrollbar-color:#3a3a3a transparent;}
+  .cal-preview::-webkit-scrollbar{width:6px;height:6px;}
+  .cal-preview::-webkit-scrollbar-track{background:transparent;}
+  .cal-preview::-webkit-scrollbar-thumb{background:#3a3a3a;border-radius:999px;border:1px solid transparent;background-clip:padding-box;}
+  .cal-preview::-webkit-scrollbar-thumb:hover{background:#505050;}
+  .cal-platform-group.open .cal-preview, .cal-platform-group:hover .cal-preview{ display:block; }
+  .cal-preview-title{ font-size:.68rem; color:var(--muted); padding:3px 5px 6px; font-weight:700; }
+  .cal-preview-item{ width:100%; border:0; background:transparent; color:var(--ink); border-radius:7px; padding:7px; text-align:left; cursor:pointer; display:block; font-family:inherit; }
+  .cal-preview-item:hover{ background:var(--panel-alt); }
+  .cal-preview-meta{ display:flex; gap:6px; align-items:center; font-size:.62rem; color:var(--muted); margin-bottom:2px; }
+  .cal-preview-post-title{ font-size:.72rem; font-weight:650; line-height:1.25; }
+  .cal-preview-type{ font-size:.56rem; border:1px solid var(--border); border-radius:4px; padding:1px 4px; }
+  @keyframes previewIn{from{opacity:0;transform:translateY(-3px) scale(.985)}to{opacity:1;transform:none}}
+
+  /* Tables — wide, readable, no inner scrollbar */
+  .table-tabs{display:flex;gap:8px;margin-bottom:0;flex-wrap:wrap;}
+  .table-tab{display:inline-flex;align-items:center;gap:7px;padding:9px 13px;border-radius:8px;border:1px solid var(--border);background:var(--panel);color:var(--muted);cursor:pointer;font-size:.8rem;font-weight:600;font-family:inherit;white-space:nowrap;transition:all .16s ease;}
+  .table-tab:hover{background:var(--panel-alt);color:var(--ink);transform:translateY(-1px);}
+  .table-tab.active{background:var(--ink);color:var(--bg);border-color:var(--ink);}
+  .table-wrap{width:100%;overflow:visible;border:1px solid var(--border);border-radius:12px;background:var(--panel);box-shadow:var(--shadow);}
+  table.data-table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;font-size:.79rem;}
+  table.data-table th{background:var(--panel-alt);text-align:left;padding:11px 10px;font-weight:700;color:var(--muted);font-size:.68rem;border-bottom:1px solid var(--border);white-space:nowrap;}
+  table.data-table td{padding:12px 10px;border-bottom:1px solid var(--border);vertical-align:top;white-space:normal;overflow-wrap:normal;word-break:normal;line-height:1.42;}
+  table.data-table td:nth-child(1),table.data-table td:nth-child(2){white-space:nowrap;font-variant-numeric:tabular-nums;}
+  table.data-table td:nth-child(3),table.data-table td:nth-child(4){white-space:nowrap;}
+  table.data-table td:nth-child(5){font-weight:650;overflow-wrap:break-word;}
+  table.data-table td:nth-child(6){color:var(--muted);overflow-wrap:break-word;}
+  table.data-table td:nth-child(7),table.data-table td:nth-child(8),table.data-table td:nth-child(9){white-space:nowrap;text-align:right;font-variant-numeric:tabular-nums;}
+  table.data-table td:nth-child(10){white-space:nowrap;text-align:center;color:var(--muted);}
+  table.data-table td:nth-child(11){white-space:nowrap;text-align:center;}
+  table.data-table td .btn-secondary{padding:6px 10px;font-size:.7rem;border-radius:7px;white-space:nowrap;}
+  .data-table tbody tr{transition:background .16s ease,box-shadow .16s ease;cursor:default;}
+  .data-table tbody tr:hover{background:var(--panel-alt);}
+  .data-table tbody tr.row-highlight{animation:rowFlash 1.8s ease;box-shadow:inset 3px 0 0 var(--ink);}
+  .status-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 7px;border:1px solid var(--border);border-radius:999px;font-size:.68rem;font-weight:700;line-height:1;white-space:nowrap;}
+  .status-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor;}
+  .status-posted{color:#15803d;background:rgba(22,163,74,.08);border-color:rgba(22,163,74,.22);}
+  .status-scheduled{color:#b45309;background:rgba(217,119,6,.08);border-color:rgba(217,119,6,.22);}
+  @keyframes rowFlash{0%,100%{background:transparent}20%,60%{background:var(--panel-alt)}}
+  @media(max-width:1000px){
+    table.data-table{font-size:.74rem;}
+    table.data-table th,table.data-table td{padding:9px 7px;}
+  }
+
+
+  /* Planner additions */
+  .table-filters{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:0 0 10px;padding:10px;border:1px solid var(--border);border-radius:9px;background:var(--panel);}
+  .table-filters input,.table-filters select{border:1px solid var(--border);background:var(--panel);color:var(--ink);border-radius:7px;padding:8px 10px;font:inherit;font-size:.75rem;min-height:34px;}
+  .table-filters input{min-width:230px;flex:1;}
+  .table-filter-count{font-size:.72rem;color:var(--muted);margin-left:auto;white-space:nowrap;}
+  .filter-clear{padding:7px 10px!important;}
+  .toolbar-mini{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+  .btn-mini{padding:7px 10px!important;font-size:.72rem!important;}
+  .cal-preview-item[draggable="true"]{cursor:grab;}
+  .cal-preview-item.dragging{opacity:.45;}
+  .cal-cell.drag-over{box-shadow:inset 0 0 0 2px var(--ink);background:var(--panel-alt);}
+  .undo-disabled{opacity:.42;pointer-events:none;}
+  @media(max-width:760px){.table-filters input{min-width:150px}.table-filter-count{margin-left:0}.toolbar-actions{margin-left:0}.topbar{padding:11px 14px}.view-nav{margin-left:0}.cal-grid{min-height:440px;height:calc(100dvh - 205px);}}
+  @media print{
+    @page{margin:12mm;}
+    body{background:#fff!important;color:#111!important;}
+    .topbar,.hint-bar,.table-filters,.selection-toolbar,.table-tabs,.btn-secondary,.btn-primary,.btn-danger,.toolbar-actions,.view-nav{display:none!important;}
+    main#mainArea{overflow:visible!important;padding:0!important;display:block!important;}
+    .view-panel.hidden{display:none!important;}
+    .view-panel{max-width:none!important;}
+    .table-wrap{overflow:visible!important;border:0!important;}
+    table.data-table{font-size:9pt!important;}
+    table.data-table th,table.data-table td{padding:5px!important;}
+    .cal-grid{height:auto!important;max-height:none!important;min-height:0!important;overflow:visible!important;}
+    .cal-preview{display:none!important;}
+  }
+
+  /* Metrics dashboard */
+  #metricsRoot{overflow:visible;padding-bottom:24px;}
+  .metrics-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:12px;}
+  .metrics-head-copy h2{margin:0;font-size:1.35rem;letter-spacing:-.02em;}
+  .metrics-head-copy p{margin:3px 0 0;color:var(--muted);font-size:.76rem;}
+  .metrics-tabs{display:flex;gap:7px;padding:3px 2px 9px;margin-bottom:14px;}
+  .metrics-tab{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;border:1px solid var(--border);background:var(--panel);color:var(--muted);border-radius:9px;padding:8px 11px;font:inherit;font-size:.76rem;font-weight:650;cursor:pointer;transition:all .16s ease;}
+  .metrics-tab:hover{background:var(--panel-alt);color:var(--ink);transform:translateY(-1px);}
+  .metrics-tab.active{background:var(--ink);color:var(--bg);border-color:var(--ink);}
+  .metrics-tab.active .platform-icon{box-shadow:0 0 0 2px rgba(255,255,255,.16);}
+  .metrics-context{display:flex;align-items:center;gap:9px;margin:2px 0 15px;color:var(--muted);font-size:.76rem;}
+  .metrics-context strong{color:var(--ink);font-size:.9rem;}
+  .kpi-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:14px;}
+  .kpi-card{background:var(--panel);border:1px solid var(--border);border-radius:11px;padding:13px 14px;min-width:0;box-shadow:var(--shadow);}
+  .kpi-label{font-size:.66rem;color:var(--muted);font-weight:650;text-transform:uppercase;letter-spacing:.055em;}
+  .kpi-value{font-size:1.28rem;font-weight:800;letter-spacing:-.025em;margin-top:5px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .kpi-sub{font-size:.64rem;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .metrics-grid{display:grid;grid-template-columns:1.35fr 1fr;gap:14px;margin-bottom:14px;}
+  .metrics-grid.equal{grid-template-columns:1fr 1fr;}
+  .chart-card{background:var(--panel);border:1px solid var(--border);border-radius:11px;padding:15px;min-width:0;box-shadow:var(--shadow);}
+  .chart-card h3{margin:0;font-size:.9rem;font-weight:750;letter-spacing:-.01em;}
+  .chart-subtitle{margin:3px 0 12px;color:var(--muted);font-size:.68rem;}
+  .metric-chart-bars{display:flex;flex-direction:column;gap:9px;}
+  .metric-bar-row{display:grid;grid-template-columns:118px 1fr 60px;align-items:center;gap:9px;min-width:0;}
+  .metric-bar-label{display:flex;align-items:center;gap:6px;min-width:0;font-size:.69rem;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .metric-bar-track{height:9px;background:var(--panel-alt);border-radius:999px;overflow:hidden;}
+  .metric-bar-fill{height:100%;border-radius:999px;min-width:2px;transition:width .45s ease;}
+  .metric-bar-value{text-align:right;font-size:.67rem;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;}
+  .donut-layout{display:flex;align-items:center;gap:18px;min-height:188px;}
+  .donut{width:150px;height:150px;border-radius:50%;position:relative;flex:0 0 150px;background:var(--panel-alt);}
+  .donut::after{content:"";position:absolute;inset:31px;border-radius:50%;background:var(--panel);border:1px solid var(--border);}
+  .donut-center{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:1;flex-direction:column;}
+  .donut-center strong{font-size:1.05rem;}
+  .donut-center span{font-size:.62rem;color:var(--muted);}
+  .donut-legend{display:flex;flex-direction:column;gap:7px;min-width:0;}
+  .legend-item{display:flex;align-items:center;gap:7px;font-size:.68rem;min-width:0;}
+  .legend-dot{width:8px;height:8px;border-radius:50%;flex:0 0 8px;}
+  .legend-item span:last-child{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums;}
+  .trend-wrap{width:100%;overflow:hidden;}
+  .trend-svg{display:block;width:100%;height:220px;}
+  .trend-grid{stroke:var(--border);stroke-width:1;}
+  .trend-line{fill:none;stroke:var(--ink);stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;}
+  .trend-dot{fill:var(--ink);}
+  .trend-label{fill:var(--muted);font-size:9px;font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,sans-serif;}
+  .weekday-grid{display:grid;grid-template-columns:repeat(7,1fr);align-items:end;gap:8px;height:190px;padding-top:10px;}
+  .weekday-col{height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:6px;min-width:0;}
+  .weekday-value{font-size:.62rem;color:var(--muted);font-variant-numeric:tabular-nums;}
+  .weekday-track{width:100%;height:130px;background:var(--panel-alt);border-radius:7px;display:flex;align-items:flex-end;overflow:hidden;}
+  .weekday-fill{width:100%;background:var(--ink);border-radius:7px;min-height:2px;transition:height .45s ease;}
+  .weekday-name{font-size:.62rem;color:var(--muted);}
+  .top-posts{display:flex;flex-direction:column;gap:0;}
+  .top-post{display:grid;grid-template-columns:28px 1fr auto;gap:9px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);min-width:0;}
+  .top-post:last-child{border-bottom:0;}
+  .top-post-rank{font-size:.72rem;font-weight:800;color:var(--muted);text-align:center;}
+  .top-post-main{min-width:0;}
+  .top-post-title{font-size:.72rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .top-post-meta{font-size:.62rem;color:var(--muted);margin-top:2px;display:flex;align-items:center;gap:5px;}
+  .top-post-metric{text-align:right;font-size:.7rem;font-weight:750;font-variant-numeric:tabular-nums;white-space:nowrap;}
+  .empty-metrics{padding:34px 10px;text-align:center;color:var(--muted);font-size:.76rem;border:1px dashed var(--border);border-radius:9px;}
+  @media(max-width:1050px){.kpi-grid{grid-template-columns:repeat(3,1fr)}.metrics-grid,.metrics-grid.equal{grid-template-columns:1fr}.metric-bar-row{grid-template-columns:105px 1fr 58px;}}
+  @media(max-width:680px){.kpi-grid{grid-template-columns:repeat(2,1fr)}.donut-layout{flex-direction:column;align-items:flex-start}.metrics-head{align-items:flex-start;flex-direction:column}.metric-bar-row{grid-template-columns:92px 1fr 52px}.metrics-tab{padding:7px 9px}}
+
+  /* Metrics */
+  .metrics-toolbar{ display:flex; align-items:center; gap:10px; margin-bottom:16px; }
+  .metrics-toolbar select{ border:1px solid var(--border); background:var(--panel); color:var(--ink); padding:8px 12px; border-radius:6px; font:inherit; font-size:0.83rem; }
+  .chart-card{ background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:16px; margin-bottom:18px; }
+  .chart-card h3{ margin:0 0 12px; font-size:1rem; font-weight:700; }
+  .chart-svg{ width:100%; height:auto; }
+  .chart-label{ fill:var(--muted); font-size:10px; font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+  .chart-value{ fill:var(--ink); font-size:10px; font-weight:600; font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
+  .rank-section{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .rank-card{ background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:16px; }
+  .rank-card h3{ margin:0 0 10px; font-size:1rem; font-weight:700; }
+  .rank-item{ display:flex; gap:10px; align-items:flex-start; padding:8px 0; border-bottom:1px solid var(--border); }
+  .rank-item:last-child{ border-bottom:none; }
+  .rank-badge{ display:inline-flex; align-items:center; justify-content:center; min-width:28px; height:20px; padding:0 5px; border-radius:4px; font-size:0.65rem; font-weight:700; flex-shrink:0; }
+  .rank-info{ display:flex; flex-direction:column; font-size:0.82rem; }
+  .rank-info span{ color:var(--muted); font-size:0.72rem; margin-top:2px; }
+
+  /* Bulk selection */
+  .selection-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;padding:9px 11px;border:1px solid var(--border);border-radius:9px;background:var(--panel-alt);}
+  .selection-count{font-size:.74rem;color:var(--muted);font-weight:650;margin-right:auto;}
+  .select-post{width:15px;height:15px;accent-color:var(--ink);cursor:pointer;}
+  .data-table tbody tr.selected-row{background:var(--panel-alt);box-shadow:inset 3px 0 0 var(--ink);}
+  .data-table tbody tr{cursor:pointer;}
+  .table-cell-preview{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;text-overflow:ellipsis;max-height:2.85em;white-space:normal;}
+  .detail-full-value{font-size:.82rem;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;background:var(--panel-alt);border:1px solid var(--border);border-radius:8px;padding:9px 10px;margin:4px 0 10px;}
+  .selection-toolbar .btn-secondary,.selection-toolbar .btn-danger{font-size:.72rem;padding:7px 11px;}
+  .bulk-delete-btn{display:inline-flex;}
+  .analysis-controls{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px;}
+  .analysis-controls select{border:1px solid var(--border);background:var(--panel);color:var(--ink);padding:8px 10px;border-radius:7px;font:inherit;font-size:.75rem;}
+  .analysis-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:14px;}
+  .analysis-card{border:1px solid var(--border);border-radius:10px;background:var(--panel);padding:12px;box-shadow:var(--shadow);}
+  .analysis-card span{font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+  .analysis-card strong{display:block;font-size:1.05rem;margin-top:4px;}
+  .analysis-table{width:100%;border-collapse:collapse;font-size:.72rem;}
+  .analysis-table th,.analysis-table td{padding:8px;border-bottom:1px solid var(--border);text-align:left;}
+  .analysis-table th{font-size:.63rem;color:var(--muted);text-transform:uppercase;}
+  .analysis-table .num{text-align:right;font-variant-numeric:tabular-nums;}
+  @media(max-width:760px){.cal-grid{height:clamp(440px,calc(100dvh - 205px),700px);min-height:440px;}.analysis-grid{grid-template-columns:1fr 1fr;}}
+  @media print{body{background:#fff!important;color:#000!important;} .topbar,.toast-stack,.overlay,.view-nav,.toolbar-actions,.month-nav{display:none!important;} main#mainArea{overflow:visible;padding:0!important;} .view-panel{max-width:none!important;} .cal-grid{height:auto!important;min-height:0!important;max-height:none!important;overflow:visible!important;} .cal-cell{break-inside:avoid;} .data-table{font-size:9pt!important;} }
+
+  /* Detail / modal overlays */
+  .overlay{ position:fixed; inset:0; background:rgba(10,10,10,0.45); display:flex; align-items:center; justify-content:center; z-index:100; padding:16px; }
+  .panel{ background:var(--panel); border:1px solid var(--border); border-radius:12px; width:100%; max-width:480px; max-height:88vh; overflow-y:auto; padding:22px; }
+  .panel h3{ font-weight:800; margin:0 0 4px; font-size:1.2rem; }
+  .panel .sub{ color:var(--muted); font-size:0.82rem; margin-bottom:14px; }
+  .panel label{ display:block; font-size:0.78rem; color:var(--muted); margin:14px 0 5px; font-weight:600; }
+  .panel input[type=text], .panel input[type=date], .panel input[type=number], .panel textarea, .panel select{
+    width:100%; padding:9px 10px; border:1px solid var(--border); border-radius:6px; background:var(--panel-alt); color:var(--ink); font:inherit;
+  }
+  .panel textarea{ resize:vertical; min-height:80px; }
+  .platform-picker{ display:flex; flex-wrap:wrap; gap:6px; }
+  .platform-pick-btn{ border:1px solid var(--border); background:var(--panel-alt); color:var(--ink); padding:7px 12px; border-radius:6px; cursor:pointer; font-size:0.82rem; font-weight:600; font-family:inherit; }
+  .platform-pick-btn.active{ background:var(--ink); color:var(--bg); border-color:var(--ink); }
+  .platform-fixed{ font-weight:700; padding:9px 0; }
+  .metrics-grid{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+  .metrics-updated-note{ font-size:0.74rem; color:var(--muted); margin-top:8px; }
+  .panel-actions{ display:flex; justify-content:space-between; margin-top:20px; gap:8px; align-items:center; }
+  .panel-actions .right{ display:flex; gap:8px; margin-left:auto; }
+
+  .detail-item{ border:1px solid var(--border); border-radius:8px; padding:12px; margin-bottom:10px; }
+  .detail-item-head{ display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+  .detail-field{ font-size:0.82rem; margin-bottom:4px; }
+  .detail-field b{ font-weight:600; }
+  .detail-item-actions{ display:flex; gap:6px; margin-top:10px; }
+  .detail-item-actions button{ font-size:0.75rem; border:1px solid var(--border); background:var(--panel-alt); padding:6px 10px; border-radius:6px; cursor:pointer; color:var(--ink); font-family:inherit; }
+  .detail-item-actions button:hover{ background:var(--panel); border-color:var(--ink); }
+
+  @media (max-height: 760px) and (min-width: 761px){ .cal-grid{ height:500px; max-height:500px; } }
+  @media (max-width: 760px){
+    .view-nav{ margin-left:0; }
+    .rank-section{ grid-template-columns:1fr; }
+    main#mainArea{ padding:12px 12px 16px; }
+    .cal-grid{ height:520px; max-height:520px; }
+    .cal-cell{ padding:6px; }
+    .cal-chip{ font-size:0.58rem; padding:3px 5px; }
+    .topbar{ padding:12px 14px; }
+    .metrics-grid{ grid-template-columns:1fr; }
+  }
+
+/* ---------- Interaction / feedback layer ---------- */
+.app-boot{position:fixed;top:14px;right:14px;z-index:9999;display:flex;align-items:center;gap:8px;padding:8px 11px;border:1px solid var(--border);border-radius:999px;background:rgba(255,255,255,.94);box-shadow:0 8px 30px rgba(0,0,0,.10);font-size:12px;font-weight:700;opacity:1;transition:opacity .35s ease,transform .35s ease;backdrop-filter:blur(10px)}
+.app-boot.hide{opacity:0;transform:translateY(-8px);pointer-events:none}
+.boot-dot{width:7px;height:7px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 0 rgba(34,197,94,.45);animation:bootPulse 1.5s infinite}
+.toast-stack{position:fixed;right:18px;bottom:18px;z-index:10000;display:flex;flex-direction:column;gap:9px;width:min(360px,calc(100vw - 36px));pointer-events:none}
+.toast{display:grid;grid-template-columns:10px 1fr auto;gap:10px;align-items:start;padding:12px 13px;border:1px solid var(--border);border-radius:14px;background:rgba(255,255,255,.98);box-shadow:0 14px 38px rgba(0,0,0,.14);animation:toastIn .28s cubic-bezier(.2,.8,.2,1) both;pointer-events:auto}
+.toast.out{animation:toastOut .24s ease both}
+.toast .toast-bar{width:4px;height:100%;min-height:30px;border-radius:99px;background:#111}
+.toast.success .toast-bar{background:#16a34a}.toast.error .toast-bar{background:#dc2626}.toast.info .toast-bar{background:#2563eb}.toast.warning .toast-bar{background:#d97706}
+.toast-title{font-size:12px;font-weight:800;line-height:1.25;margin-bottom:2px}.toast-msg{font-size:12px;color:var(--muted);line-height:1.35}.toast-close{border:0;background:transparent;color:#888;cursor:pointer;padding:0 2px;font-size:16px;line-height:1}
+.storage-status{display:inline-flex;align-items:center;gap:6px;margin-left:8px;padding:5px 9px;border:1px solid var(--border);border-radius:999px;background:var(--panel);font-size:11px;font-weight:800;color:var(--muted);vertical-align:middle;transition:all .25s ease}
+.storage-status.saving{color:#b45309;border-color:#f59e0b;background:#fffbeb}.storage-status.saved{color:#15803d;border-color:#86efac;background:#f0fdf4}.storage-status.error{color:#b91c1c;border-color:#fca5a5;background:#fef2f2}
+.storage-dot{width:6px;height:6px;border-radius:50%;background:currentColor}.storage-status.saving .storage-dot{animation:bootPulse .9s infinite}
+button,.platform-pick-btn,.chip,.card,.day,.metric-card{transition:transform .16s ease,box-shadow .2s ease,border-color .2s ease,background .2s ease,opacity .2s ease}
+button:not(:disabled):hover{transform:translateY(-1px)}
+button:not(:disabled):active{transform:translateY(0) scale(.98)}
+.day:hover{box-shadow:0 7px 22px rgba(0,0,0,.08);transform:translateY(-1px)}
+.card:hover,.metric-card:hover{transform:translateY(-2px);box-shadow:0 10px 26px rgba(0,0,0,.08)}
+.panel{animation:panelIn .2s cubic-bezier(.2,.8,.2,1)}
+.modal-backdrop,.overlay{animation:fadeIn .18s ease both}
+.post-chip{animation:chipIn .22s ease both}
+@keyframes bootPulse{0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.35)}50%{box-shadow:0 0 0 6px rgba(34,197,94,0)}}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes panelIn{from{opacity:0;transform:translateY(8px) scale(.99)}to{opacity:1;transform:none}}
+@keyframes toastIn{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:none}}
+@keyframes toastOut{from{opacity:1;transform:none}to{opacity:0;transform:translateY(8px) scale(.98)}}
+@keyframes chipIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+
+
+/* ===== DESIGN BASELINE: uploaded Social Planner reference ===== */
+:root{
+  --bg:#0B0B0B !important;
+  --panel:#141414 !important;
+  --panel-alt:#1E1E1E !important;
+  --border:#2C2C2C !important;
+  --ink:#F2F2F2 !important;
+  --muted:#9A9A9A !important;
+  --shadow:0 1px 2px rgba(0,0,0,.5) !important;
+}
+html,body{background:#0B0B0B !important;color:#F2F2F2 !important;}
+body{font-family:'Bricolage Grotesque',ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif !important;}
+.topbar{background:#141414 !important;border-bottom:1px solid #2C2C2C !important;padding:14px 26px !important;}
+.btn-primary,.view-nav button.active,.table-tab.active,.platform-pick-btn.active{background:#F2F2F2 !important;color:#0B0B0B !important;border-color:#F2F2F2 !important;}
+.btn-primary:hover,.view-nav button.active:hover,.table-tab.active:hover{background:#D8D8D8 !important;}
+.btn-import,.btn-secondary,.month-nav button,.view-nav button,.table-tab,.platform-pick-btn{background:#141414 !important;color:#F2F2F2 !important;border-color:#2C2C2C !important;}
+.btn-import:hover,.btn-secondary:hover,.month-nav button:hover,.view-nav button:hover,.table-tab:hover,.platform-pick-btn:hover{background:#1E1E1E !important;border-color:#505050 !important;color:#F2F2F2 !important;}
+.cal-grid,.table-wrap,.chart-card,.rank-card,.kpi-card,.analysis-card,.detail-item,.panel,.cal-preview{background:#141414 !important;border-color:#2C2C2C !important;}
+.cal-cell{background:#141414 !important;}
+.cal-cell:hover,.cal-cell-dim,.table-cell-preview:hover{background:#1E1E1E !important;}
+.cal-weekday,.cal-preview-title,.cal-preview-meta,.chart-subtitle,.kpi-label,.kpi-sub,.top-post-meta,.empty-metrics{color:#9A9A9A !important;}
+.cal-platform-btn,.cal-preview-item,.data-table th,.data-table td,.metrics-toolbar select,.analysis-controls select{background:#141414 !important;color:#F2F2F2 !important;border-color:#2C2C2C !important;}
+.cal-preview-item:hover,.data-table tbody tr:hover{background:#1E1E1E !important;}
+.data-table th{background:#1E1E1E !important;color:#9A9A9A !important;}
+.status-badge{display:inline-flex !important;align-items:center !important;padding:2px 7px !important;border:1px solid #3A3A3A !important;border-radius:5px !important;background:#1E1E1E !important;color:#D8D8D8 !important;font-size:.65rem !important;font-weight:650 !important;line-height:1.25 !important;}
+.status-posted{background:#F2F2F2 !important;color:#0B0B0B !important;border-color:#F2F2F2 !important;}
+.status-scheduled{background:#1E1E1E !important;color:#BDBDBD !important;border-color:#3A3A3A !important;}
+.overlay{background:rgba(0,0,0,.72) !important;}
+.panel input[type=text],.panel input[type=date],.panel input[type=number],.panel textarea,.panel select{background:#1E1E1E !important;color:#F2F2F2 !important;border-color:#2C2C2C !important;}
+.panel input:focus,.panel textarea:focus,.panel select:focus{border-color:#707070 !important;outline:none !important;}
+.platform-icon{color:#FFFFFF;}
+.platform-icon svg{color:currentColor !important;}
+.metric-bar-track,.weekday-track,.donut{background:#1E1E1E !important;}
+.metric-bar-fill,.weekday-fill,.trend-line,.trend-dot{background:#F2F2F2 !important;stroke:#F2F2F2 !important;fill:#F2F2F2 !important;}
+.trend-grid{stroke:#2C2C2C !important;}
+.rank-badge{background:#1E1E1E !important;color:#F2F2F2 !important;border:1px solid #3A3A3A !important;}
+.app-boot,.toast{background:#141414 !important;color:#F2F2F2 !important;border-color:#2C2C2C !important;}
+.toast .toast-bar,.boot-dot{background:#F2F2F2 !important;}
+.storage-status{background:#141414 !important;color:#9A9A9A !important;border-color:#2C2C2C !important;}
+.storage-status.saving,.storage-status.saved,.storage-status.error{background:#141414 !important;color:#BDBDBD !important;border-color:#3A3A3A !important;}
+*{scrollbar-color:#3A3A3A transparent !important;}
+*::-webkit-scrollbar-thumb{background:#3A3A3A !important;}
+*::-webkit-scrollbar-thumb:hover{background:#505050 !important;}
+@media(max-width:760px){.topbar{padding:12px 14px !important;}}
+
+</style>
+
+<style id="monochrome-dark-theme">
+:root{
+  color-scheme:dark !important;
+  --accent:#ffffff !important; --accent-2:#d9d9d9 !important;
+  --bg:#080808 !important; --panel:#111111 !important; --panel-2:#171717 !important;
+  --surface:#141414 !important; --border:#303030 !important;
+  --text:#ffffff !important; --muted:#a0a0a0 !important; --subtle:#777777 !important;
+}
+html,body{background:#080808 !important;color:#fff !important;}
+body *{border-color:#303030;}
+button,input,select,textarea{background:#141414 !important;color:#fff !important;border-color:#303030 !important;}
+button:hover{background:#202020 !important;}
+::selection{background:#666 !important;color:#fff !important;}
+.status-posted,.status-scheduled{background:#242424 !important;color:#fff !important;border-color:#444 !important;}
+.badge,.chip,.tag,.filter-chip{background:#202020 !important;color:#d0d0d0 !important;border-color:#383838 !important;}
+.cal-preview,.modal,.dropdown,.popover{background:#111 !important;border-color:#303030 !important;}
+::-webkit-scrollbar{width:6px;height:6px;}
+::-webkit-scrollbar-track{background:#0a0a0a;}
+::-webkit-scrollbar-thumb{background:#4a4a4a;border-radius:999px;}
+::-webkit-scrollbar-thumb:hover{background:#666;}
+*{scrollbar-color:#4a4a4a #0a0a0a;scrollbar-width:thin;}
+</style>
+</head>
+<body>
+<div id="appBoot" class="app-boot" aria-hidden="true"><span class="boot-dot"></span><span>Loading planner…</span></div>
+<div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="false"></div>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">Social Planner</div><span id="storageStatus" class="storage-status saved"><span class="storage-dot"></span><span class="storage-label">Saved locally</span></span><span class="brand-sub">Content calendar</span>
+      <nav class="month-nav">
+        <button data-action="prev-month" type="button">Prev</button>
+        <span class="month-label" id="monthLabel"></span>
+        <button data-action="today" type="button">Today</button>
+        <button data-action="next-month" type="button">Next</button>
+      </nav>
+      <div class="toolbar-actions">
+        <button class="btn-import" data-action="bulk-import" type="button">Bulk Import JSON</button>
+        <button class="btn-primary" data-action="add-post" type="button">Add Post</button>
+      </div>
+      <nav class="view-nav">
+        <button data-action="view" data-view="calendar" id="tabCalendar" type="button">Calendar</button>
+        <button data-action="view" data-view="tables" id="tabTables" type="button">Tables</button>
+        <button data-action="view" data-view="metrics" id="tabMetrics" type="button">Metrics</button>
+      </nav>
+    </header>
+    <main id="mainArea">
+      <div id="calendarRoot" class="view-panel"></div>
+      <div id="tablesRoot" class="view-panel hidden"></div>
+      <div id="metricsRoot" class="view-panel hidden"></div>
+    </main>
+  </div>
+
+  <div id="detailOverlay" class="overlay hidden"></div>
+  <div id="postOverlay" class="overlay hidden"></div>
+  <div id="bulkOverlay" class="overlay hidden"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  var PLATFORMS = [
+    { key:'yt', name:'YouTube',   short:'YT', shade:'#FF0000', text:'#FFFFFF', icon:'#FF0000' },
+    { key:'ig', name:'Instagram', short:'IG', shade:'#E1306C', text:'#FFFFFF', icon:'#E1306C' },
+    { key:'fb', name:'Facebook',  short:'FB', shade:'#1877F2', text:'#FFFFFF', icon:'#1877F2' },
+    { key:'th', name:'Threads',   short:'TH', shade:'#111111', text:'#FFFFFF', icon:'#111111' },
+    { key:'li', name:'LinkedIn',  short:'LI', shade:'#0A66C2', text:'#FFFFFF', icon:'#0A66C2' },
+    { key:'x',  name:'X',         short:'X',  shade:'#111111', text:'#FFFFFF', icon:'#111111' }
+  ];
+
+  // Every platform now has an explicit content type so the planner knows whether
+  // an item is a Short, Reel, Post, Text, Video, etc.
+  var CONTENT_TYPES = {
+    yt: ['Video','Short','Live','Community Post','Other'],
+    ig: ['Reel','Post','Carousel','Story','Live','Other'],
+    fb: ['Reel','Video','Image','Text','Story','Link','Other'],
+    th: ['Text','Image','Video','GIF','Link','Other'],
+    li: ['Text','Image','Video','Document','Article','Poll','Event','Other'],
+    x:  ['Text','Image','Video','GIF','Link','Thread','Other']
+  };
+
+  var FIELD_SCHEMA = {
+    yt: [ {key:'contentType', label:'Content type', type:'select', options:CONTENT_TYPES.yt}, {key:'title', label:'Title', type:'text'}, {key:'description', label:'Description', type:'textarea'} ],
+    ig: [ {key:'contentType', label:'Content type', type:'select', options:CONTENT_TYPES.ig}, {key:'topic', label:'Topic name', type:'text'}, {key:'caption', label:'Caption', type:'textarea'} ],
+    fb: [ {key:'contentType', label:'Content type', type:'select', options:CONTENT_TYPES.fb}, {key:'topic', label:'Topic name', type:'text'}, {key:'content', label:'Content / Caption', type:'textarea'} ],
+    th: [ {key:'contentType', label:'Content type', type:'select', options:CONTENT_TYPES.th}, {key:'topic', label:'Topic name', type:'text'}, {key:'content', label:'Content', type:'textarea'} ],
+    li: [ {key:'contentType', label:'Content type', type:'select', options:CONTENT_TYPES.li}, {key:'topic', label:'Topic name', type:'text'}, {key:'content', label:'Content', type:'textarea'} ],
+    x:  [ {key:'contentType', label:'Content type', type:'select', options:CONTENT_TYPES.x}, {key:'topic', label:'Topic name', type:'text'}, {key:'content', label:'Content', type:'textarea'} ]
+  };
+
+  var METRIC_FIELDS = [
+    { key:'views', label:'Views' },
+    { key:'likes', label:'Likes' },
+    { key:'comments', label:'Comments' }
+  ];
+
+  function platform(key){ for(var i=0;i<PLATFORMS.length;i++){ if(PLATFORMS[i].key===key) return PLATFORMS[i]; } return PLATFORMS[0]; }
+  function platformIcon(key){
+    var p=platform(key), color=(key==='th'||key==='x')?'#FFFFFF':(p.icon||p.shade), iconColor=(key==='th'||key==='x')?'#111111':'#FFFFFF';
+    var body='', vb='0 0 24 24';
+    if(key==='yt'){ vb='0 0 576 512'; body='<path fill="currentColor" d="M549.655 124.083c-6.281-23.65-24.787-42.276-48.284-48.597C458.781 64 288 64 288 64S117.22 64 74.629 75.486c-23.497 6.322-42.003 24.947-48.284 48.597-11.412 42.867-11.412 132.305-11.412 132.305s0 89.438 11.412 132.305c6.281 23.65 24.787 41.5 48.284 47.821C117.22 448 288 448 288 448s170.78 0 213.371-11.486c23.497-6.321 42.003-24.171 48.284-47.821c11.412-42.867 11.412-132.305 11.412-132.305s0-89.438-11.412-132.305zm-317.51 213.508V175.185l142.739 81.205-142.739 81.201z"/>';
+    } else if(key==='ig'){ vb='0 0 448 512'; body='<path fill="currentColor" d="M224.1 141c-63.6 0-114.9 51.3-114.9 114.9s51.3 114.9 114.9 114.9S339 319.5 339 255.9 287.7 141 224.1 141zm0 189.6c-41.1 0-74.7-33.5-74.7-74.7s33.5-74.7 74.7-74.7 74.7 33.5 74.7 74.7-33.6 74.7-74.7 74.7zm146.4-194.3c0 14.9-12 26.8-26.8 26.8-14.9 0-26.8-12-26.8-26.8 0-14.9 12-26.8 26.8-26.8s26.8 12 26.8 26.8zm76.1 27.2c-1.7-35.9-9.9-67.7-36.2-93.9-26.2-26.2-58-34.4-93.9-36.2-37-2.1-147.9-2.1-184.9 0-35.8 1.7-67.6 9.9-93.9 36.1s-34.4 58-36.2 93.9c-2.1 37-2.1 147.9 0 184.9 1.7 35.9 9.9 67.7 36.2 93.9s58 34.4 93.9 36.2c37 2.1 147.9 2.1 184.9 0 35.9-1.7 67.7-9.9 93.9-36.2 26.2-26.2 34.4-58 36.2-93.9 2.1-37 2.1-147.8 0-184.8zM398.8 388c-7.8 19.6-22.9 34.7-42.6 42.6-29.5 11.7-99.5 9-132.1 9s-102.7 2.6-132.1-9c-19.6-7.8-34.7-22.9-42.6-42.6-11.7-29.5-9-99.5-9-132.1s-2.6-102.7 9-132.1c7.8-19.6 22.9-34.7 42.6-42.6 29.5-11.7 99.5-9 132.1-9s102.7-2.6 132.1 9c19.6 7.8 34.7 22.9 42.6 42.6 11.7 29.5 9 99.5 9 132.1s2.7 102.7-9 132.1z"/>';
+    } else if(key==='fb'){ vb='0 0 512 512'; body='<path fill="currentColor" d="M512 256C512 114.6 397.4 0 256 0S0 114.6 0 256C0 376 82.7 476.8 194.2 504.5V334.2H141.4V256h52.8V222.3c0-87.1 39.4-127.5 125-127.5c16.2 0 44.2 3.2 55.7 6.4V172c-6-.6-16.5-1-29.6-1c-42 0-58.2 15.9-58.2 57.2V256h83.6l-14.4 78.2H287V510.1C413.8 494.8 512 386.9 512 256z"/>';
+    } else if(key==='th'){ vb='0 0 448 512'; body='<path fill="currentColor" d="M331.5 235.7c2.2 .9 4.2 1.9 6.3 2.8c29.2 14.1 50.6 35.2 61.8 61.4c15.7 36.5 17.2 95.8-30.3 143.2c-36.2 36.2-80.3 52.5-142.6 53h-.3c-70.2-.5-124.1-24.1-160.4-70.2c-32.3-41-48.9-98.1-49.5-169.6V256v-.2C17 184.3 33.6 127.2 65.9 86.2C102.2 40.1 156.2 16.5 226.4 16h.3c70.3 .5 124.9 24 162.3 69.9c18.4 22.7 32 50 40.6 81.7l-40.4 10.8c-7.1-25.8-17.8-47.8-32.2-65.4c-29.2-35.8-73-54.2-130.5-54.6c-57 .5-100.1 18.8-128.2 54.4C72.1 146.1 58.5 194.3 58 256c.5 61.7 14.1 109.9 40.3 143.3c28 35.6 71.2 53.9 128.2 54.4c51.4-.4 85.4-12.6 113.7-40.9c32.3-32.2 31.7-71.8 21.4-95.9c-6.1-14.2-17.1-26-31.9-34.9c-3.7 26.9-11.8 48.3-24.7 64.8c-17.1 21.8-41.4 33.6-72.7 35.3c-23.6 1.3-46.3-4.4-63.9-16c-20.8-13.8-33-34.8-34.3-59.3c-2.5-48.3 35.7-83 95.2-86.4c21.1-1.2 40.9-.3 59.2 2.8c-2.4-14.8-7.3-26.6-14.6-35.2c-10-11.7-25.6-17.7-46.2-17.8H227c-16.6 0-39 4.6-53.3 26.3l-34.4-23.6c19.2-29.1 50.3-45.1 87.8-45.1h.8c62.6 .4 99.9 39.5 103.7 107.7l-.2 .2zm-156 68.8c1.3 25.1 28.4 36.8 54.6 35.3c25.6-1.4 54.6-11.4 59.5-73.2c-13.2-2.9-27.8-4.4-43.4-4.4c-4.8 0-9.6 .1-14.4 .4c-42.9 2.4-57.2 23.2-56.2 41.8l-.1 .1z"/>';
+    } else if(key==='li'){ vb='0 0 448 512'; body='<path fill="currentColor" d="M416 32H31.9C14.3 32 0 46.5 0 64.3v383.4C0 465.5 14.3 480 31.9 480H416c17.6 0 32-14.5 32-32.3V64.3C448 46.5 433.6 32 416 32zM135.4 416H69V202.2h66.5V416zm-33.2-243c-21.3 0-38.5-17.3-38.5-38.5S80.9 96 102.2 96c21.2 0 38.5 17.3 38.5 38.5 0 21.3-17.2 38.5-38.5 38.5zm282.1 243h-66.4V312c0-24.8-.5-56.7-34.5-56.7-34.6 0-39.9 27-39.9 54.9V416h-66.4V202.2h63.7v29.2h.9c8.9-16.8 30.6-34.5 62.9-34.5 67.2 0 79.7 44.3 79.7 101.9V416z"/>';
+    } else if(key==='x'){ vb='0 0 512 512'; body='<path fill="currentColor" d="M389.2 48h70.6L305.6 224.2 487 464H345L233.7 318.6 106.5 464H35.8L200.7 275.5 26.8 48H172.4L272.9 180.9 389.2 48zM364.4 421.8h39.1L151.1 88h-42z"/>'; }
+    return '<span class="platform-icon" style="background:'+color+';color:'+iconColor+'" aria-hidden="true"><svg viewBox="'+vb+'" preserveAspectRatio="xMidYMid meet">'+body+'</svg></span>';
+  }
+  function schemaFor(key){ return FIELD_SCHEMA[key] || FIELD_SCHEMA.x; }
+
+  function escapeHtml(str){
+    if(str===undefined || str===null) return '';
+    return String(str).replace(/[&<>"']/g, function(c){
+      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c];
+    });
+  }
+  function truncate(str, n){
+    if(!str) return '';
+    return str.length>n ? str.slice(0,n-1)+'\u2026' : str;
+  }
+  function formatDate(d){
+    var y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+    return y+'-'+m+'-'+day;
+  }
+  function prettyDate(dateStr){
+    if(!dateStr) return '';
+    var parts=dateStr.split('-');
+    var d=new Date(Number(parts[0]), Number(parts[1])-1, Number(parts[2]));
+    return d.toLocaleDateString('en-US',{weekday:'long', month:'long', day:'numeric', year:'numeric'});
+  }
+  function prettyDateShort(dateStr){
+    if(!dateStr) return '';
+    var parts=dateStr.split('-');
+    var d=new Date(Number(parts[0]), Number(parts[1])-1, Number(parts[2]));
+    return d.toLocaleDateString('en-US',{month:'short', day:'numeric'});
+  }
+  function relativeTime(ts){
+    if(!ts) return '\u2014';
+    var diff=Date.now()-ts;
+    var min=60000, hr=3600000, day=86400000;
+    if(diff<min) return 'just now';
+    if(diff<hr) return Math.floor(diff/min)+'m ago';
+    if(diff<day) return Math.floor(diff/hr)+'h ago';
+    if(diff<day*30) return Math.floor(diff/day)+'d ago';
+    return new Date(ts).toLocaleDateString('en-US',{month:'short', day:'numeric', year:'numeric'});
+  }
+  function getStatus(dateStr){
+    var today = formatDate(new Date());
+    return dateStr < today ? 'posted' : 'scheduled';
+  }
+  function getPreview(post){
+    var text;
+    switch(post.platform){
+      case 'yt': text = post.title || ''; break;
+      case 'ig': text = post.caption || post.topic || ''; break;
+      case 'fb': text = post.content || post.topic || ''; break;
+      default: text = post.content || post.topic || '';
+    }
+    return text || '(no content yet)';
+  }
+
+  // ---------- Notifications / save feedback ----------
+  var toastStack = document.getElementById('toastStack');
+  var storageStatus = document.getElementById('storageStatus');
+  var appBoot = document.getElementById('appBoot');
+  var toastSeq = 0;
+
+  function showToast(title, message, type, duration){
+    type = type || 'info'; duration = duration || 3200;
+    if(!toastStack) return;
+    var id='toast_'+(++toastSeq);
+    var el=document.createElement('div');
+    el.className='toast '+type; el.id=id;
+    el.innerHTML='<div class="toast-bar"></div><div><div class="toast-title">'+escapeHtml(title)+'</div><div class="toast-msg">'+escapeHtml(message||'')+'</div></div><button class="toast-close" type="button" aria-label="Dismiss">×</button>';
+    el.querySelector('.toast-close').addEventListener('click',function(){dismissToast(el);});
+    toastStack.appendChild(el);
+    while(toastStack.children.length>4){ dismissToast(toastStack.firstElementChild); }
+    setTimeout(function(){dismissToast(el);},duration);
+  }
+  function dismissToast(el){
+    if(!el || !el.parentNode || el.classList.contains('out')) return;
+    el.classList.add('out'); setTimeout(function(){if(el.parentNode)el.parentNode.removeChild(el);},230);
+  }
+  function setStorageStatus(kind, label){
+    if(!storageStatus) return;
+    storageStatus.className='storage-status '+kind;
+    var t=storageStatus.querySelector('.storage-label'); if(t)t.textContent=label;
+  }
+  function flashSaved(){
+    setStorageStatus('saving','Saving…');
+    setTimeout(function(){setStorageStatus('saved','Saved locally');},180);
+  }
+
+  // ---------- State ----------
+  var state = {
+    posts: [],
+    view: 'calendar',
+    currentMonth: (function(){ var t=new Date(); return { year:t.getFullYear(), month:t.getMonth() }; })(),
+    currentTableTab: 'yt',
+    metricsTab: 'all',
+    analysisMetric: 'views',
+    analysisDimension: 'contentType',
+    selectedPosts: {},
+    selectionMode: false,
+    tableSearch: '',
+    tableContentType: 'all',
+    tableStatus: 'all',
+    tableSort: 'date',
+    tableSortDir: 'asc',
+    history: [],
+    redoHistory: [],
+    focusDate: formatDate(new Date()),
+  };
+
+  var modalState = { id:null, platform:'yt', date:'', time:'', fields:{}, metrics:{ views:'', likes:'', comments:'' } };
+
+  // ---------- Persistent Store ----------
+  // Schedules are stored in browser storage and restored automatically on startup.
+  // Data survives browser/app restarts and remains until the user deletes it or
+  // clears this browser's site data.
+  var STORE_KEY = 'social_planner_posts_v2';
+  var LEGACY_STORE_KEY = 'sp_posts';
+
+  var Store = {
+    load(){
+      try{
+        var raw = localStorage.getItem(STORE_KEY);
+        if(raw){
+          var parsed = JSON.parse(raw);
+          state.posts = (Array.isArray(parsed) ? parsed : (parsed.posts || [])).map(function(p, idx){
+            // Backward compatibility with the previous Facebook `type` field.
+            if(!p.contentType && p.type){ p.contentType = p.type; }
+            if(!p.id) p.id='p_legacy_'+idx+'_'+Date.now();
+            return p;
+          });
+          this.save();
+          setStorageStatus('saved','Saved locally');
+          return;
+        }
+
+        // Migrate schedules from the original planner version.
+        var legacy = localStorage.getItem(LEGACY_STORE_KEY);
+        if(legacy){
+          var legacyPosts = JSON.parse(legacy);
+          state.posts = (Array.isArray(legacyPosts) ? legacyPosts : []).map(function(p, idx){
+            if(!p.contentType && p.type){ p.contentType = p.type; }
+            if(!p.id) p.id='p_legacy_'+idx+'_'+Date.now();
+            return p;
+          });
+          this.save();
+        } else {
+          state.posts = [];
+        }
+      }catch(e){
+        console.error('Could not load saved schedules:', e);
+        state.posts = [];
+        setStorageStatus('error','Storage unavailable');
+      }
+    },
+
+    save(){
+      try{
+        localStorage.setItem(STORE_KEY, JSON.stringify(state.posts));
+        setStorageStatus('saved','Saved locally');
+        return true;
+      }catch(e){
+        console.error('Could not save schedules:', e);
+        try{
+          localStorage.removeItem(LEGACY_STORE_KEY);
+          localStorage.setItem(STORE_KEY, JSON.stringify(state.posts));
+          setStorageStatus('saved','Saved locally');
+          return true;
+        }catch(retryError){
+          setStorageStatus('error','Storage full');
+          setTimeout(function(){showToast('Storage limit reached','Your browser storage is full. Export or remove older posts before adding more data.','error',5200);},0);
+          return false;
+        }
+      }
+    },
+
+    add(data){
+      var id = 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2,8);
+      var payload = Object.assign({id:id, createdAt:Date.now(), updatedAt:Date.now()}, data);
+      state.posts.push(payload);
+      var ok=this.save();
+      if(ok) flashSaved();
+      return id;
+    },
+
+    update(id, data){
+      var idx=-1;
+      for(var i=0;i<state.posts.length;i++){
+        if(state.posts[i].id===id){ idx=i; break; }
+      }
+      if(idx>-1){
+        state.posts[idx] = Object.assign({}, state.posts[idx], data, {updatedAt:Date.now()});
+        var ok=this.save();
+        if(ok) flashSaved();
+      }
+    },
+
+    remove(id){
+      var target=String(id||'');
+      var before=state.posts.length;
+      state.posts = state.posts.filter(function(p){ return String(p.id||'')!==target; });
+      var removed = state.posts.length < before;
+      if(removed) this.save();
+      return removed;
+    },
+
+    clearAll(){
+      state.posts = [];
+      this.save();
+    }
+  };
+
+  // ---------- History / undo-redo ----------
+  function clonePosts(posts){ return JSON.parse(JSON.stringify(posts || state.posts)); }
+  function pushHistory(){ state.history.push(clonePosts()); if(state.history.length>50) state.history.shift(); state.redoHistory=[]; }
+  function restoreHistory(posts){ state.posts=clonePosts(posts); state.selectedPosts={}; Store.save(); render(); }
+  function undoChange(){ if(!state.history.length){showToast('Nothing to undo','There are no previous changes.','info',1800);return;} state.redoHistory.push(clonePosts()); var snap=state.history.pop(); restoreHistory(snap); showToast('Undo','Previous change restored.','success',1800); }
+  function redoChange(){ if(!state.redoHistory.length){showToast('Nothing to redo','There are no changes waiting to be restored.','info',1800);return;} state.history.push(clonePosts()); var snap=state.redoHistory.pop(); restoreHistory(snap); showToast('Redo','Change restored.','success',1800); }
+
+  // ---------- Bulk selection / deletion ----------
+  function selectedIds(){ return Object.keys(state.selectedPosts).filter(function(id){ return state.selectedPosts[id] && state.posts.some(function(p){return p.id===id;}); }); }
+  function clearSelection(){ state.selectedPosts={}; }
+  function deleteSelectedPosts(){
+    var ids=selectedIds(); if(!ids.length) return;
+    if(!confirm('Delete '+ids.length+' selected post'+(ids.length===1?'':'s')+'?')) return;
+    pushHistory();
+    var idSet={}; ids.forEach(function(id){idSet[String(id)]=true;});
+    state.posts=state.posts.filter(function(p){return !idSet[String(p.id||'')];});
+    clearSelection();
+    var saved=Store.save();
+    render();
+    if(saved) showToast('Posts deleted',ids.length+' post'+(ids.length===1?'':'s')+' removed.','success',2600);
+  }
+
+  function deletePostById(id){
+    var target=String(id||'');
+    if(!target) return;
+    var post=state.posts.find(function(p){return String(p.id||'')===target;});
+    if(!post) return;
+    if(!confirm('Delete this post?')) return;
+    pushHistory();
+    var removed=Store.remove(target);
+    if(!removed) return;
+    delete state.selectedPosts[target];
+    closeDetailPanel();
+    closePostModal();
+    render();
+    showToast('Post deleted','The post was removed from your calendar.','success',2600);
+  }
+
+  // ---------- DOM refs ----------
+  var calendarRoot, tablesRoot, metricsRoot, detailOverlay, postOverlay, bulkOverlay, monthLabel;
+
+  function cacheDom(){
+    calendarRoot = document.getElementById('calendarRoot');
+    tablesRoot = document.getElementById('tablesRoot');
+    metricsRoot = document.getElementById('metricsRoot');
+    detailOverlay = document.getElementById('detailOverlay');
+    postOverlay = document.getElementById('postOverlay');
+    bulkOverlay = document.getElementById('bulkOverlay');
+    monthLabel = document.getElementById('monthLabel');
+  }
+
+  // ---------- Render dispatch ----------
+  function render(){
+    updateNav();
+    if(state.view==='calendar') renderCalendar();
+    else if(state.view==='tables') renderTables();
+    else renderMetrics();
+    syncUrlState();
+  }
+
+  function updateNav(){
+    document.getElementById('tabCalendar').classList.toggle('active', state.view==='calendar');
+    document.getElementById('tabTables').classList.toggle('active', state.view==='tables');
+    document.getElementById('tabMetrics').classList.toggle('active', state.view==='metrics');
+    var d = new Date(state.currentMonth.year, state.currentMonth.month, 1);
+    monthLabel.textContent = d.toLocaleDateString('en-US', {month:'long', year:'numeric'});
+    calendarRoot.classList.toggle('hidden', state.view!=='calendar');
+    tablesRoot.classList.toggle('hidden', state.view!=='tables');
+    metricsRoot.classList.toggle('hidden', state.view!=='metrics');
+  }
+
+  // ---------- Calendar ----------
+  function buildMonthGrid(year, month){
+    var first = new Date(year, month, 1);
+    var startWeekday = (first.getDay() + 6) % 7; // Monday = 0
+    var daysInMonth = new Date(year, month+1, 0).getDate();
+    var daysInPrevMonth = new Date(year, month, 0).getDate();
+    var cells = [];
+    for(var i=0;i<startWeekday;i++){
+      var num = daysInPrevMonth - startWeekday + 1 + i;
+      cells.push({ date: new Date(year, month-1, num), otherMonth:true, num:num });
+    }
+    for(var d=1; d<=daysInMonth; d++){
+      cells.push({ date: new Date(year, month, d), otherMonth:false, num:d });
+    }
+    var trailingDays = (7 - (cells.length % 7)) % 7;
+    for(var t=1; t<=trailingDays; t++){
+      cells.push({ date: new Date(year, month+1, t), otherMonth:true, num:t });
+    }
+    return cells;
+  }
+
+  function renderCalendar(){
+    var cells = buildMonthGrid(state.currentMonth.year, state.currentMonth.month);
+    var todayStr = formatDate(new Date());
+    var weekdayNames = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+    var weekdaysHtml = weekdayNames.map(function(w){ return '<div class="cal-weekday">'+w+'</div>'; }).join('');
+
+    var cellsHtml = cells.map(function(cell){
+      var dateStr = formatDate(cell.date);
+      var isToday = dateStr === todayStr;
+      var dayPosts = cell.otherMonth ? [] : state.posts.filter(function(p){ return p.date===dateStr; }).sort(function(a,b){ return (a.time||'99:99').localeCompare(b.time||'99:99'); });
+      var groups=[];
+      PLATFORMS.forEach(function(plat){
+        var posts=dayPosts.filter(function(p){return p.platform===plat.key;});
+        if(!posts.length) return;
+        var items=posts.map(function(p){
+          var title=truncate(getPreview(p),80);
+          var meta=prettyDateShort(p.date)+(p.time?' · '+p.time:'');
+          var type=p.contentType?'<span class="cal-preview-type">'+escapeHtml(p.contentType)+'</span>':'';
+          return '<button type="button" class="cal-preview-item" draggable="true" data-action="jump-table" data-drag-post="'+p.id+'" data-id="'+p.id+'" data-platform="'+p.platform+'">'+
+            '<div class="cal-preview-meta"><span>'+escapeHtml(meta)+'</span>'+type+'</div>'+
+            '<div class="cal-preview-post-title">'+escapeHtml(title)+'</div>'+
+          '</button>';
+        }).join('');
+        groups.push('<div class="cal-platform-group" data-platform-group="'+plat.key+'">'+
+          '<button type="button" class="cal-platform-btn" data-action="calendar-platform" data-platform="'+plat.key+'" data-date="'+dateStr+'" title="View '+escapeHtml(plat.name)+' posts">'+
+            platformIcon(plat.key)+'<span>'+escapeHtml(plat.name)+'</span><span class="platform-count">'+posts.length+'</span>'+
+          '</button>'+
+          '<div class="cal-preview"><div class="cal-preview-title">'+escapeHtml(plat.name)+' · '+posts.length+' post'+(posts.length===1?'':'s')+'</div>'+items+'</div>'+
+        '</div>');
+      });
+
+      var classes = 'cal-cell' + (cell.otherMonth?' cal-cell-dim':'') + (isToday?' cal-cell-today':'');
+      return '<div class="'+classes+'" tabindex="0" data-action="day" data-date="'+dateStr+'">'+
+        '<div class="cal-cell-head"><span class="cal-cell-num">'+cell.num+'</span></div>'+
+        '<div class="cal-chip-list">'+groups.join('')+'</div>'+
+      '</div>';
+    }).join('');
+
+    var numRows = cells.length / 7;
+    var hint = state.posts.length===0 ? '<div class="hint-bar">Nothing planned yet. Click Add Post, or click any day to add one there.</div>' : '';
+    calendarRoot.innerHTML = hint + '<div class="cal-weekdays">'+weekdaysHtml+'</div><div class="cal-grid" style="grid-template-rows:repeat('+numRows+',1fr)">'+cellsHtml+'</div>';
+  }
+
+  function navMonth(delta){
+    var m = state.currentMonth.month + delta;
+    var y = state.currentMonth.year;
+    if(m<0){ m=11; y-=1; }
+    else if(m>11){ m=0; y+=1; }
+    state.currentMonth = { year:y, month:m };
+    state.view = 'calendar';
+    render();
+  }
+  function goToday(){
+    var t = new Date();
+    state.currentMonth = { year:t.getFullYear(), month:t.getMonth() };
+    state.view = 'calendar';
+    render();
+  }
+
+  // ---------- Detail panel ----------
+  function openDetailPanel(dateStr, highlightId){
+    var posts = state.posts.filter(function(p){ return p.date===dateStr; });
+    var status = getStatus(dateStr);
+
+    var itemsHtml = posts.length ? posts.map(function(p){
+      var plat = platform(p.platform);
+      var fieldsHtml = schemaFor(p.platform).map(function(f){
+        var val = p[f.key];
+        if(!val) return '';
+        return '<div class="detail-field"><b>'+f.label+':</b> '+escapeHtml(val)+'</div>';
+      }).join('');
+      var metricsHtml = '';
+      if(p.metricsUpdatedAt){
+        var parts = METRIC_FIELDS.filter(function(m){ return p.metrics && p.metrics[m.key]!==null && p.metrics[m.key]!==undefined; })
+          .map(function(m){ return m.label+': '+p.metrics[m.key]; });
+        if(parts.length) metricsHtml = '<div class="detail-field" style="color:var(--muted)">'+parts.join(' \u00b7 ')+' (updated '+relativeTime(p.metricsUpdatedAt)+')</div>';
+      }
+      var highlightStyle = (highlightId && p.id===highlightId) ? ' style="border-color:var(--ink)"' : '';
+      return '<div class="detail-item"'+highlightStyle+'>'+
+        '<div class="detail-item-head"><span class="rank-badge" style="background:'+plat.shade+';color:'+plat.text+'">'+plat.short+'</span><strong>'+plat.name+'</strong>'+(p.contentType ? '<span class="status-badge" style="margin-left:4px">'+escapeHtml(p.contentType)+'</span>' : '')+(p.time ? '<span style="margin-left:auto;color:var(--muted);font-size:.78rem">'+escapeHtml(p.time)+'</span>' : '')+'</div>'+
+        fieldsHtml + metricsHtml +
+        '<div class="detail-item-actions">'+
+          '<button type="button" data-action="edit-post" data-id="'+p.id+'">Edit</button>'+
+          '<button type="button" data-action="delete-post" data-id="'+p.id+'">Delete</button>'+
+        '</div>'+
+      '</div>';
+    }).join('') : '<p class="empty-note">No posts on this date yet.</p>';
+
+    detailOverlay.innerHTML =
+      '<div class="panel" role="dialog" aria-modal="true">'+
+        '<h3>'+prettyDate(dateStr)+'</h3>'+
+        '<div class="sub"><span class="status-badge status-'+status+'">'+(status==='posted'?'Posted':'Scheduled')+'</span></div>'+
+        itemsHtml+
+        '<div class="panel-actions"><span></span><div class="right">'+
+          '<button type="button" class="btn-secondary" data-action="close-detail">Close</button>'+
+          '<button type="button" class="btn-primary" data-action="add-post-for-date" data-date="'+dateStr+'">Add post</button>'+
+        '</div></div>'+
+      '</div>';
+    detailOverlay.classList.remove('hidden');
+  }
+  function openTablePostDetail(post){
+    if(!post) return;
+    var plat=platform(post.platform);
+    var status=getStatus(post.date);
+    var fieldsHtml=schemaFor(post.platform).map(function(f){
+      var val=post[f.key];
+      if(val===undefined || val===null || val==='') return '';
+      return '<div class="detail-field"><b>'+escapeHtml(f.label)+'</b><div class="detail-full-value">'+escapeHtml(val)+'</div></div>';
+    }).join('');
+    var metricsHtml=METRIC_FIELDS.map(function(m){
+      var v=post.metrics && post.metrics[m.key]!==undefined && post.metrics[m.key]!==null ? post.metrics[m.key] : '—';
+      return '<div class="detail-field"><b>'+escapeHtml(m.label)+'</b><div class="detail-full-value">'+escapeHtml(v)+'</div></div>';
+    }).join('');
+    detailOverlay.innerHTML=
+      '<div class="panel" role="dialog" aria-modal="true">'+
+        '<div class="detail-item-head" style="margin-bottom:10px"><span class="rank-badge" style="background:'+plat.shade+';color:'+plat.text+'">'+plat.short+'</span><strong>'+escapeHtml(plat.name)+'</strong><span class="status-badge status-'+status+'" style="margin-left:auto">'+(status==='posted'?'Posted':'Scheduled')+'</span></div>'+
+        '<h3 style="margin-bottom:4px">'+escapeHtml(post.contentType || 'Post')+'</h3>'+
+        '<div class="sub">'+escapeHtml(prettyDate(post.date))+(post.time?' · '+escapeHtml(post.time):'')+'</div>'+
+        '<div class="detail-field"><b>Post ID</b><div class="detail-full-value">'+escapeHtml(post.id)+'</div></div>'+
+        fieldsHtml+metricsHtml+
+        (post.metricsUpdatedAt?'<div class="detail-field" style="color:var(--muted)">Metrics updated '+escapeHtml(relativeTime(post.metricsUpdatedAt))+'</div>':'')+
+        '<div class="panel-actions"><span></span><div class="right">'+
+          '<button type="button" class="btn-secondary" data-action="close-detail">Close</button>'+
+          '<button type="button" class="btn-secondary" data-action="edit-post" data-id="'+escapeHtml(post.id)+'">Edit</button>'+
+          '<button type="button" class="btn-danger" data-action="delete-post" data-id="'+escapeHtml(post.id)+'">Delete</button>'+
+        '</div></div>'+
+      '</div>';
+    detailOverlay.classList.remove('hidden');
+  }
+
+  function closeDetailPanel(){
+    detailOverlay.classList.add('hidden');
+    detailOverlay.innerHTML = '';
+  }
+
+  // ---------- Tables ----------
+  function tableFilteredPosts(){
+    var search=String(state.tableSearch||'').trim().toLowerCase();
+    var platformFilter=state.currentTableTab||'all';
+    var typeFilter=state.tableContentType||'all';
+    var statusFilter=state.tableStatus||'all';
+    var posts=state.posts.filter(function(p){
+      if(platformFilter!=='all' && p.platform!==platformFilter) return false;
+      if(typeFilter!=='all' && String(p.contentType||'')!==typeFilter) return false;
+      if(statusFilter!=='all' && getStatus(p.date)!==statusFilter) return false;
+      if(search){
+        var fields=schemaFor(p.platform).map(function(f){return p[f.key]||'';}).join(' ');
+        var hay=(p.platform+' '+(p.contentType||'')+' '+fields+' '+getPreview(p)).toLowerCase();
+        if(hay.indexOf(search)===-1) return false;
+      }
+      return true;
+    });
+    var sort=state.tableSort||'date', dir=state.tableSortDir==='desc'?-1:1;
+    posts.sort(function(a,b){
+      var av,bv;
+      if(sort==='views'||sort==='likes'||sort==='comments'){av=metricNumber(a,sort);bv=metricNumber(b,sort);return (av-bv)*dir;}
+      if(sort==='platform'){av=platform(a.platform).name;bv=platform(b.platform).name;return av.localeCompare(bv)*dir;}
+      if(sort==='contentType'){av=a.contentType||'';bv=b.contentType||'';return av.localeCompare(bv)*dir;}
+      av=(a.date||'')+' '+(a.time||'99:99'); bv=(b.date||'')+' '+(b.time||'99:99');
+      return av.localeCompare(bv)*dir;
+    });
+    return posts;
+  }
+
+  function tableTypeOptions(posts){
+    var seen={all:true}, vals=['all'];
+    posts.forEach(function(p){var t=String(p.contentType||'').trim();if(t&&!seen[t]){seen[t]=true;vals.push(t);}});
+    return vals.map(function(v){return '<option value="'+escapeHtml(v)+'" '+(state.tableContentType===v?'selected':'')+'>'+escapeHtml(v==='all'?'All content types':v)+'</option>';}).join('');
+  }
+
+  function renderTables(){
+    var tabsHtml='<button type="button" class="table-tab'+(state.currentTableTab==='all'?' active':'')+'" data-action="table-tab" data-platform="all">All Platforms</button>'+PLATFORMS.map(function(p){
+      var active = state.currentTableTab===p.key ? ' active' : '';
+      return '<button type="button" class="table-tab'+active+'" data-action="table-tab" data-platform="'+p.key+'">'+platformIcon(p.key)+escapeHtml(p.name)+'</button>';
+    }).join('');
+    var posts=tableFilteredPosts();
+    var sourceForTypes=state.currentTableTab==='all'?state.posts:state.posts.filter(function(p){return p.platform===state.currentTableTab;});
+    var selectedCount=selectedIds().length;
+    var allSelected=posts.length && posts.every(function(p){return !!state.selectedPosts[p.id];});
+    var filterHtml='<div class="table-filters">'+
+      '<input type="search" id="tableSearch" value="'+escapeHtml(state.tableSearch||'')+'" placeholder="Search posts, topics, captions, titles…" aria-label="Search posts">'+
+      '<select id="tableContentType" aria-label="Filter by content type">'+tableTypeOptions(sourceForTypes)+'</select>'+
+      '<select id="tableStatus" aria-label="Filter by status"><option value="all" '+(state.tableStatus==='all'?'selected':'')+'>All statuses</option><option value="posted" '+(state.tableStatus==='posted'?'selected':'')+'>Posted</option><option value="scheduled" '+(state.tableStatus==='scheduled'?'selected':'')+'>Scheduled</option></select>'+
+      '<select id="tableSort" aria-label="Sort posts"><option value="date" '+(state.tableSort==='date'?'selected':'')+'>Sort: Date</option><option value="views" '+(state.tableSort==='views'?'selected':'')+'>Sort: Views</option><option value="likes" '+(state.tableSort==='likes'?'selected':'')+'>Sort: Likes</option><option value="comments" '+(state.tableSort==='comments'?'selected':'')+'>Sort: Comments</option><option value="platform" '+(state.tableSort==='platform'?'selected':'')+'>Sort: Platform</option><option value="contentType" '+(state.tableSort==='contentType'?'selected':'')+'>Sort: Content type</option></select>'+
+      '<button type="button" class="btn-secondary btn-mini" data-action="sort-direction">'+(state.tableSortDir==='desc'?'Descending':'Ascending')+'</button>'+
+      '<button type="button" class="btn-secondary btn-mini filter-clear" data-action="clear-table-filters">Clear</button>'+
+      '<span class="table-filter-count">'+posts.length+' result'+(posts.length===1?'':'s')+'</span></div>';
+    var selectionHtml=state.selectionMode ?
+      '<div class="selection-toolbar"><span class="selection-count">'+selectedCount+' selected</span><label style="display:flex;align-items:center;gap:6px;font-size:.74rem;color:var(--muted);"><input class="select-post" type="checkbox" data-action="select-all-visible" '+(allSelected?'checked':'')+'> Select all visible</label><button type="button" class="btn-danger" data-action="delete-selected" '+(selectedCount?'':'disabled style="opacity:.45;cursor:not-allowed"')+'>Delete selected</button><button type="button" class="btn-secondary" data-action="exit-delete-mode">Cancel</button></div>' :
+      '<div class="selection-toolbar"><span class="selection-count">Delete mode is off</span><div class="toolbar-mini"><button type="button" class="btn-danger" data-action="enter-delete-mode">Delete</button><button type="button" class="btn-secondary btn-mini" data-action="export-json">Export JSON</button><button type="button" class="btn-secondary btn-mini" data-action="export-csv">Export CSV</button><button type="button" class="btn-secondary btn-mini" data-action="print-table">Print / PDF</button></div></div>';
+
+    var title=state.currentTableTab==='all'?'All Platforms':platform(state.currentTableTab).name;
+    var header='<div class="table-toolbar"><div><h2 class="table-title">'+(state.currentTableTab==='all'?'':platformIcon(state.currentTableTab))+escapeHtml(title)+'</h2><div class="table-subtitle">'+posts.length+' matching item'+(posts.length===1?'':'s')+' · Click any row to view the complete post</div></div><div class="table-tabs">'+tabsHtml+'</div></div>'+filterHtml+selectionHtml;
+
+    var rowsHtml='';
+    if(state.currentTableTab==='all'){
+      rowsHtml=posts.map(function(p){
+        var status=getStatus(p.date), selected=!!state.selectedPosts[p.id];
+        var checkbox=state.selectionMode?'<td style="width:38px" data-row-control="true"><input class="select-post" type="checkbox" data-action="select-post" data-id="'+escapeHtml(p.id)+'" '+(selected?'checked':'')+'></td>':'';
+        return '<tr id="table-row-'+escapeHtml(p.id)+'" data-post-row="'+escapeHtml(p.id)+'" class="'+(selected?'selected-row':'')+'">'+checkbox+
+          '<td>'+platformIcon(p.platform)+escapeHtml(platform(p.platform).name)+'</td><td>'+prettyDateShort(p.date)+'</td><td>'+escapeHtml(p.time||'—')+'</td><td><span class="status-badge status-'+status+'">'+(status==='posted'?'Posted':'Scheduled')+'</span></td><td>'+escapeHtml(p.contentType||'—')+'</td><td><div class="table-cell-preview" title="'+escapeHtml(getPreview(p))+'">'+escapeHtml(truncate(getPreview(p),90))+'</div></td><td>'+metricNumber(p,'views')+'</td><td>'+metricNumber(p,'likes')+'</td><td>'+metricNumber(p,'comments')+'</td><td>'+relativeTime(p.metricsUpdatedAt)+'</td><td data-row-control="true"><button type="button" class="btn-secondary" data-action="edit-post" data-id="'+escapeHtml(p.id)+'">Edit</button></td></tr>';
+      }).join('');
+      var empty=posts.length===0?'<tr><td colspan="'+((state.selectionMode?1:0)+11)+'" class="empty-note">No posts match the current filters.</td></tr>':'';
+      tablesRoot.innerHTML=header+'<div class="table-wrap"><table class="data-table data-table-all"><thead><tr>'+(state.selectionMode?'<th></th>':'')+'<th>Platform</th><th>Date</th><th>Time</th><th>Status</th><th>Type</th><th>Content</th><th>Views</th><th>Likes</th><th>Comments</th><th>Metrics updated</th><th></th></tr></thead><tbody>'+rowsHtml+empty+'</tbody></table></div>';
+      return;
+    }
+    var schema=schemaFor(state.currentTableTab), headFields=schema.map(function(f){return '<th>'+escapeHtml(f.label)+'</th>';}).join(''), headMetrics=METRIC_FIELDS.map(function(m){return '<th>'+escapeHtml(m.label)+'</th>';}).join('');
+    rowsHtml=posts.map(function(p){
+      var status=getStatus(p.date), selected=!!state.selectedPosts[p.id];
+      var checkbox=state.selectionMode ? '<td style="width:38px" data-row-control="true"><input class="select-post" type="checkbox" data-action="select-post" data-id="'+escapeHtml(p.id)+'" '+(selected?'checked':'')+' aria-label="Select post"></td>' : '';
+      var fieldCells=schema.map(function(f){var val=p[f.key]||'—';return '<td class="table-cell-'+escapeHtml(f.key)+'"><div class="table-cell-preview" title="'+escapeHtml(val)+'">'+escapeHtml(val)+'</div></td>';}).join('');
+      var metricCells=METRIC_FIELDS.map(function(m){var v=p.metrics&&(p.metrics[m.key]!==null&&p.metrics[m.key]!==undefined)?p.metrics[m.key]:'—';return '<td>'+v+'</td>';}).join('');
+      return '<tr id="table-row-'+escapeHtml(p.id)+'" data-post-row="'+escapeHtml(p.id)+'" class="'+(selected?'selected-row':'')+'">'+checkbox+'<td>'+prettyDateShort(p.date)+'</td><td>'+escapeHtml(p.time||'—')+'</td><td><span class="status-badge status-'+status+'">'+(status==='posted'?'Posted':'Scheduled')+'</span></td>'+fieldCells+metricCells+'<td>'+relativeTime(p.metricsUpdatedAt)+'</td><td data-row-control="true"><button type="button" class="btn-secondary" data-action="edit-post" data-id="'+escapeHtml(p.id)+'">Edit</button></td></tr>';
+    }).join('');
+    var colCount=(state.selectionMode?1:0)+3+schema.length+METRIC_FIELDS.length+2;
+    var emptyRow=posts.length===0?'<tr><td colspan="'+colCount+'" class="empty-note">No posts match the current filters.</td></tr>':'';
+    tablesRoot.innerHTML=header+'<div class="table-wrap"><table class="data-table data-table-'+state.currentTableTab+'"><thead><tr>'+(state.selectionMode?'<th style="width:38px"></th>':'')+'<th>Date</th><th>Time</th><th>Status</th>'+headFields+headMetrics+'<th>Metrics updated</th><th></th></tr></thead><tbody>'+rowsHtml+emptyRow+'</tbody></table></div>';
+  }
+
+  // ---------- Metrics ----------
+  function metricNumber(post, key){
+    var v=post && post.metrics ? Number(post.metrics[key]) : 0;
+    return Number.isFinite(v) ? v : 0;
+  }
+  function metricSummary(pool){
+    var views=0, likes=0, comments=0;
+    pool.forEach(function(p){ views+=metricNumber(p,'views'); likes+=metricNumber(p,'likes'); comments+=metricNumber(p,'comments'); });
+    return {count:pool.length,views:views,likes:likes,comments:comments,avgViews:pool.length?views/pool.length:0,engagement:views?((likes+comments)/views)*100:0};
+  }
+  function formatMetric(n){
+    n=Number(n)||0;
+    var abs=Math.abs(n);
+    if(abs>=1000000) return (n/1000000).toFixed(abs>=10000000?0:1)+'M';
+    if(abs>=1000) return (n/1000).toFixed(abs>=100000?0:1)+'K';
+    return Math.round(n).toLocaleString();
+  }
+  function metricsKpis(summary){
+    return '<div class="kpi-grid">'+
+      '<div class="kpi-card"><div class="kpi-label">Posts</div><div class="kpi-value">'+formatMetric(summary.count)+'</div><div class="kpi-sub">scheduled / published</div></div>'+
+      '<div class="kpi-card"><div class="kpi-label">Views</div><div class="kpi-value">'+formatMetric(summary.views)+'</div><div class="kpi-sub">total recorded</div></div>'+
+      '<div class="kpi-card"><div class="kpi-label">Likes</div><div class="kpi-value">'+formatMetric(summary.likes)+'</div><div class="kpi-sub">total recorded</div></div>'+
+      '<div class="kpi-card"><div class="kpi-label">Comments</div><div class="kpi-value">'+formatMetric(summary.comments)+'</div><div class="kpi-sub">total recorded</div></div>'+
+      '<div class="kpi-card"><div class="kpi-label">Avg views / post</div><div class="kpi-value">'+formatMetric(summary.avgViews)+'</div><div class="kpi-sub">based on recorded views</div></div>'+
+      '<div class="kpi-card"><div class="kpi-label">Engagement</div><div class="kpi-value">'+summary.engagement.toFixed(2)+'%</div><div class="kpi-sub">(likes + comments) / views</div></div>'+
+    '</div>';
+  }
+  function metricsTabsHtml(){
+    var html='<div class="metrics-tabs">';
+    html+='<button type="button" class="metrics-tab '+(state.metricsTab==='all'?'active':'')+'" data-action="metrics-tab" data-platform="all">Overview</button>';
+    PLATFORMS.forEach(function(p){ html+='<button type="button" class="metrics-tab '+(state.metricsTab===p.key?'active':'')+'" data-action="metrics-tab" data-platform="'+p.key+'">'+platformIcon(p.key)+'<span>'+escapeHtml(p.name)+'</span></button>'; });
+    return html+'</div>';
+  }
+  function metricBarChart(items, valueKey, percentMode){
+    var max=Math.max(1,Math.max.apply(null,items.map(function(x){return Number(x[valueKey])||0;})));
+    return '<div class="metric-chart-bars">'+items.map(function(x){
+      var v=Number(x[valueKey])||0, pct=(v/max)*100, p=platform(x.key);
+      return '<div class="metric-bar-row"><div class="metric-bar-label">'+platformIcon(x.key)+'<span>'+escapeHtml(p.name)+'</span></div><div class="metric-bar-track"><div class="metric-bar-fill" style="width:'+Math.max(v?2:0,pct)+'%;background:'+p.shade+'"></div></div><div class="metric-bar-value">'+(percentMode?v.toFixed(2)+'%':formatMetric(v))+'</div></div>';
+    }).join('')+'</div>';
+  }
+  function contentTypeChart(pool){
+    var counts={}; pool.forEach(function(p){var t=p.contentType||'Other'; counts[t]=(counts[t]||0)+1;});
+    var items=Object.keys(counts).map(function(k){return {label:k,value:counts[k]};}).sort(function(a,b){return b.value-a.value;}).slice(0,8);
+    if(!items.length) return '<div class="empty-metrics">No content-type data yet.</div>';
+    var max=Math.max(1,Math.max.apply(null,items.map(function(x){return x.value;})));
+    return '<div class="metric-chart-bars">'+items.map(function(x){return '<div class="metric-bar-row"><div class="metric-bar-label"><span>'+escapeHtml(x.label)+'</span></div><div class="metric-bar-track"><div class="metric-bar-fill" style="width:'+(x.value/max*100)+'%;background:var(--ink)"></div></div><div class="metric-bar-value">'+x.value+'</div></div>';}).join('')+'</div>';
+  }
+  function donutChart(items){
+    var total=items.reduce(function(a,x){return a+x.value;},0);
+    if(!total) return '<div class="empty-metrics">No posts yet.</div>';
+    var angle=0, stops=[];
+    items.forEach(function(x){var p=platform(x.key), next=angle+(x.value/total*360); stops.push(p.shade+' '+angle+'deg '+next+'deg'); angle=next;});
+    return '<div class="donut-layout"><div class="donut" style="background:conic-gradient('+stops.join(',')+')"><div class="donut-center"><strong>'+formatMetric(total)+'</strong><span>posts</span></div></div><div class="donut-legend">'+items.map(function(x){var p=platform(x.key);return '<div class="legend-item"><i class="legend-dot" style="background:'+p.shade+'"></i><b>'+escapeHtml(p.name)+'</b><span>'+x.value+'</span></div>';}).join('')+'</div></div>';
+  }
+  function viewsTrendChart(pool){
+    var byDate={}; pool.forEach(function(p){var d=p.date||'Unknown'; if(d!=='Unknown') byDate[d]=(byDate[d]||0)+metricNumber(p,'views');});
+    var dates=Object.keys(byDate).sort();
+    if(!dates.length) return '<div class="empty-metrics">No dated view data yet.</div>';
+    if(dates.length>31) dates=dates.slice(-31);
+    var vals=dates.map(function(d){return byDate[d];}), max=Math.max(1,Math.max.apply(null,vals));
+    var W=760,H=220,L=34,R=16,T=18,B=30,innerW=W-L-R,innerH=H-T-B;
+    var points=vals.map(function(v,i){var x=L+(dates.length===1?innerW/2:i*(innerW/(dates.length-1)));var y=T+innerH-(v/max*innerH);return [x,y];});
+    var poly=points.map(function(pt){return pt[0].toFixed(1)+','+pt[1].toFixed(1);}).join(' ');
+    var grids=[0,.5,1].map(function(r){var y=T+innerH*r;return '<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y+'" y2="'+y+'" class="trend-grid"/>';}).join('');
+    var labels='';
+    [0,Math.floor((dates.length-1)/2),dates.length-1].forEach(function(i){if(i<0)return;var pt=points[i];labels+='<text x="'+pt[0]+'" y="'+(H-9)+'" text-anchor="middle" class="trend-label">'+escapeHtml(prettyDateShort(dates[i]))+'</text>';});
+    var dots=points.map(function(pt){return '<circle cx="'+pt[0]+'" cy="'+pt[1]+'" r="3" class="trend-dot"/>';}).join('');
+    return '<div class="trend-wrap"><svg viewBox="0 0 '+W+' '+H+'" class="trend-svg" role="img" aria-label="Views over time">'+grids+'<polyline points="'+poly+'" class="trend-line"/>'+dots+labels+'</svg></div>';
+  }
+  function weekdayChart(pool){
+    var names=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], counts=[0,0,0,0,0,0,0];
+    pool.forEach(function(p){if(!p.date)return;var a=p.date.split('-');var d=new Date(Number(a[0]),Number(a[1])-1,Number(a[2]));var idx=(d.getDay()+6)%7;counts[idx]++;});
+    var max=Math.max(1,Math.max.apply(null,counts));
+    return '<div class="weekday-grid">'+names.map(function(n,i){return '<div class="weekday-col"><span class="weekday-value">'+counts[i]+'</span><div class="weekday-track"><div class="weekday-fill" style="height:'+(counts[i]/max*100)+'%"></div></div><span class="weekday-name">'+n+'</span></div>';}).join('')+'</div>';
+  }
+  function topPostsHtml(pool){
+    var list=pool.slice().sort(function(a,b){return metricNumber(b,'views')-metricNumber(a,'views');}).slice(0,5);
+    if(!list.length) return '<div class="empty-metrics">No posts available.</div>';
+    return '<div class="top-posts">'+list.map(function(p,i){var pl=platform(p.platform);return '<div class="top-post"><div class="top-post-rank">'+(i+1)+'</div><div class="top-post-main"><div class="top-post-title">'+escapeHtml(truncate(getPreview(p),75))+'</div><div class="top-post-meta">'+platformIcon(p.platform)+'<span>'+escapeHtml(pl.name)+'</span><span>·</span><span>'+escapeHtml(prettyDateShort(p.date))+(p.time?' · '+escapeHtml(p.time):'')+'</span></div></div><div class="top-post-metric">'+formatMetric(metricNumber(p,'views'))+' views</div></div>';}).join('')+'</div>';
+  }
+  function renderMetricsOverview(pool){
+    var stats=PLATFORMS.map(function(p){var ps=pool.filter(function(x){return x.platform===p.key;}), s=metricSummary(ps);return {key:p.key,posts:s.count,views:s.views,engagement:s.engagement};});
+    var summary=metricSummary(pool);
+    return metricsKpis(summary)+
+      '<div class="metrics-grid"><div class="chart-card"><h3>Views by platform</h3><div class="chart-subtitle">Total recorded views</div>'+metricBarChart(stats,'views',false)+'</div><div class="chart-card"><h3>Engagement rate</h3><div class="chart-subtitle">Likes + comments divided by views</div>'+metricBarChart(stats,'engagement',true)+'</div></div>'+ 
+      '<div class="metrics-grid equal"><div class="chart-card"><h3>Content volume</h3><div class="chart-subtitle">Posts currently in the planner</div>'+donutChart(stats.map(function(x){return {key:x.key,value:x.posts};}))+'</div><div class="chart-card"><h3>Posts by platform</h3><div class="chart-subtitle">Count of scheduled / published items</div>'+metricBarChart(stats,'posts',false)+'</div></div>'+ 
+      '<div class="metrics-grid equal"><div class="chart-card"><h3>Top posts</h3><div class="chart-subtitle">Highest recorded views</div>'+topPostsHtml(pool)+'</div><div class="chart-card"><h3>Publishing activity</h3><div class="chart-subtitle">Posts by day of week</div>'+weekdayChart(pool)+'</div></div>';
+  }
+  function renderMetricsPlatform(key,pool){
+    var pl=platform(key), summary=metricSummary(pool);
+    var typeItems=pool.map(function(p){return p.contentType||'Other';}).reduce(function(a,t){a[t]=(a[t]||0)+1;return a;},{});
+    var typeList=Object.keys(typeItems).map(function(t){return {label:t,value:typeItems[t]};}).sort(function(a,b){return b.value-a.value;});
+    var engagementByType={};
+    pool.forEach(function(p){var t=p.contentType||'Other'; if(!engagementByType[t]) engagementByType[t]={views:0,likes:0,comments:0}; engagementByType[t].views+=metricNumber(p,'views');engagementByType[t].likes+=metricNumber(p,'likes');engagementByType[t].comments+=metricNumber(p,'comments');});
+    var engItems=Object.keys(engagementByType).map(function(t){var x=engagementByType[t];return {label:t,value:x.views?((x.likes+x.comments)/x.views*100):0};}).sort(function(a,b){return b.value-a.value;}).slice(0,8);
+    var maxEng=Math.max(1,Math.max.apply(null,engItems.map(function(x){return x.value;})));
+    var engChart='<div class="metric-chart-bars">'+engItems.map(function(x){return '<div class="metric-bar-row"><div class="metric-bar-label"><span>'+escapeHtml(x.label)+'</span></div><div class="metric-bar-track"><div class="metric-bar-fill" style="width:'+(x.value/maxEng*100)+'%;background:'+pl.shade+'"></div></div><div class="metric-bar-value">'+x.value.toFixed(2)+'%</div></div>';}).join('')+'</div>';
+    return '<div class="metrics-context">'+platformIcon(key)+'<strong>'+escapeHtml(pl.name)+'</strong><span>platform analysis</span></div>'+metricsKpis(summary)+
+      '<div class="metrics-grid"><div class="chart-card"><h3>Views trend</h3><div class="chart-subtitle">Recorded views by upload date</div>'+viewsTrendChart(pool)+'</div><div class="chart-card"><h3>Content mix</h3><div class="chart-subtitle">Posts by content type</div>'+contentTypeChart(pool)+'</div></div>'+ 
+      '<div class="metrics-grid equal"><div class="chart-card"><h3>Engagement by content type</h3><div class="chart-subtitle">Rate based on recorded views</div>'+(engItems.length?engChart:'<div class="empty-metrics">No engagement data yet.</div>')+'</div><div class="chart-card"><h3>Publishing activity</h3><div class="chart-subtitle">Posts by day of week</div>'+weekdayChart(pool)+'</div></div>'+ 
+      '<div class="chart-card"><h3>Top '+escapeHtml(pl.name)+' posts</h3><div class="chart-subtitle">Highest recorded views</div>'+topPostsHtml(pool)+'</div>';
+  }
+  function renderPerformanceAnalysis(pool){
+    if(!pool.length) return '<div class="empty-metrics">No posts available for analysis.</div>';
+    var metric=state.analysisMetric || 'views', dim=state.analysisDimension || 'contentType';
+    function val(p){var m=p.metrics||{};var v=Number(m[metric]);return Number.isFinite(v)?v:0;}
+    function engagement(p){var m=p.metrics||{};var v=Number(m.views)||0;return v?((Number(m.likes)||0)+(Number(m.comments)||0))/v*100:0;}
+    var groups={};
+    pool.forEach(function(p){var k=dim==='contentType'?(p.contentType||'Other'):platform(p.platform).name;if(!groups[k])groups[k]=[];groups[k].push(p);});
+    var rows=Object.keys(groups).map(function(k){var a=groups[k], total=a.reduce(function(s,p){return s+val(p);},0), er=a.reduce(function(s,p){return s+engagement(p);},0)/a.length;return {key:k,count:a.length,total:total,avg:total/a.length,eng:er};}).sort(function(a,b){return b.avg-a.avg;});
+    var best=rows[0], worst=rows[rows.length-1];
+    return '<div class="analysis-controls"><select id="analysisMetric"><option value="views" '+(metric==='views'?' selected':'')+'>Views</option><option value="likes" '+(metric==='likes'?' selected':'')+'>Likes</option><option value="comments" '+(metric==='comments'?' selected':'')+'>Comments</option></select><select id="analysisDimension"><option value="contentType" '+(dim==='contentType'?' selected':'')+'>By content type</option><option value="platform" '+(dim==='platform'?' selected':'')+'>By platform</option></select></div>'+
+      '<div class="analysis-grid"><div class="analysis-card"><span>Best average</span><strong>'+escapeHtml(best.key)+'</strong></div><div class="analysis-card"><span>Highest average</span><strong>'+formatMetric(best.avg)+'</strong></div><div class="analysis-card"><span>Lowest average</span><strong>'+escapeHtml(worst.key)+'</strong></div></div>'+
+      '<div class="chart-card"><h3>Performance breakdown</h3><div class="chart-subtitle">Average results per post. This makes content formats/platforms easier to compare.</div><table class="analysis-table"><thead><tr><th>Group</th><th>Posts</th><th>Average</th><th>Total</th><th>Engagement</th></tr></thead><tbody>'+rows.map(function(r){return '<tr><td>'+escapeHtml(r.key)+'</td><td class="num">'+r.count+'</td><td class="num">'+formatMetric(r.avg)+'</td><td class="num">'+formatMetric(r.total)+'</td><td class="num">'+r.eng.toFixed(2)+'%</td></tr>';}).join('')+'</tbody></table></div>';
+  }
+
+  function renderMetrics(){
+    var pool=state.metricsTab==='all'?state.posts:state.posts.filter(function(p){return p.platform===state.metricsTab;});
+    var title=state.metricsTab==='all'?'Analytics overview':platform(state.metricsTab).name+' analytics';
+    var subtitle=state.metricsTab==='all'?'Cross-platform performance from the data stored in this planner.':'Detailed performance breakdown for this platform.';
+    metricsRoot.innerHTML='<div class="metrics-head"><div class="metrics-head-copy"><h2>'+escapeHtml(title)+'</h2><p>'+escapeHtml(subtitle)+'</p></div></div>'+metricsTabsHtml()+renderPerformanceAnalysis(pool)+(state.metricsTab==='all'?renderMetricsOverview(pool):renderMetricsPlatform(state.metricsTab,pool));
+  }
+
+  // ---------- Post modal ----------
+  function generateFieldsHtml(platformKey, values){
+    return schemaFor(platformKey).map(function(f){
+      var val = values[f.key] || '';
+      if(f.type==='textarea'){
+        return '<label for="field_'+f.key+'">'+f.label+'</label><textarea id="field_'+f.key+'" data-field="'+f.key+'">'+escapeHtml(val)+'</textarea>';
+      }
+      if(f.type==='select'){
+        var opts = f.options.map(function(o){ return '<option value="'+o+'"'+(val===o?' selected':'')+'>'+o+'</option>'; }).join('');
+        return '<label for="field_'+f.key+'">'+f.label+'</label><select id="field_'+f.key+'" data-field="'+f.key+'">'+opts+'</select>';
+      }
+      return '<label for="field_'+f.key+'">'+f.label+'</label><input type="text" id="field_'+f.key+'" data-field="'+f.key+'" value="'+escapeHtml(val)+'">';
+    }).join('');
+  }
+
+  function openPostModal(preset){
+    preset = preset || {};
+    var plat = preset.platform || 'yt';
+    var fields = {};
+    schemaFor(plat).forEach(function(f){ fields[f.key] = preset[f.key] || ''; });
+    modalState = {
+      id: preset.id || null,
+      platform: plat,
+      date: preset.date || formatDate(new Date()),
+      time: preset.time || '',
+      fields: fields,
+      metrics: {
+        views: (preset.metrics && preset.metrics.views!==null && preset.metrics.views!==undefined) ? preset.metrics.views : '',
+        likes: (preset.metrics && preset.metrics.likes!==null && preset.metrics.likes!==undefined) ? preset.metrics.likes : '',
+        comments: (preset.metrics && preset.metrics.comments!==null && preset.metrics.comments!==undefined) ? preset.metrics.comments : ''
+      },
+      metricsUpdatedAt: preset.metricsUpdatedAt || null
+    };
+    renderPostModal();
+    postOverlay.classList.remove('hidden');
+  }
+  function closePostModal(){
+    postOverlay.classList.add('hidden');
+    postOverlay.innerHTML = '';
+  }
+
+  function syncModalFromDom(){
+    var dateEl = document.getElementById('modalDateInput');
+    if(dateEl) modalState.date = dateEl.value;
+    var timeEl = document.getElementById('modalTimeInput');
+    if(timeEl) modalState.time = timeEl.value;
+    schemaFor(modalState.platform).forEach(function(f){
+      var el = document.getElementById('field_'+f.key);
+      if(el) modalState.fields[f.key] = el.value;
+    });
+    METRIC_FIELDS.forEach(function(m){
+      var el = document.getElementById('metric_'+m.key);
+      if(el) modalState.metrics[m.key] = el.value;
+    });
+  }
+
+  function pickPlatform(key){
+    if(modalState.id) return; // platform is fixed once a post exists
+    syncModalFromDom();
+    var carried = {};
+    schemaFor(key).forEach(function(f){
+      carried[f.key] = modalState.fields[f.key] || '';
+    });
+    modalState.platform = key;
+    modalState.fields = carried;
+    renderPostModal();
+  }
+
+  function renderPostModal(){
+    var isEdit = !!modalState.id;
+    var platformSection;
+    if(isEdit){
+      var p = platform(modalState.platform);
+      platformSection = '<label>Platform</label><div class="platform-fixed">'+p.name+'</div>';
+    } else {
+      var pickerHtml = PLATFORMS.map(function(p){
+        var active = modalState.platform===p.key ? ' active' : '';
+        return '<button type="button" class="platform-pick-btn'+active+'" data-action="pick-platform" data-platform="'+p.key+'">'+p.name+'</button>';
+      }).join('');
+      platformSection = '<label>Platform</label><div class="platform-picker">'+pickerHtml+'</div>';
+    }
+
+    var fieldsHtml = generateFieldsHtml(modalState.platform, modalState.fields);
+    var metricsHtml = METRIC_FIELDS.map(function(m){
+      var val = modalState.metrics[m.key];
+      return '<div><label for="metric_'+m.key+'">'+m.label+'</label><input type="number" min="0" id="metric_'+m.key+'" value="'+(val===undefined?'':val)+'" placeholder="\u2014"></div>';
+    }).join('');
+    var updatedNote = modalState.metricsUpdatedAt ? '<div class="metrics-updated-note">Metrics last updated '+relativeTime(modalState.metricsUpdatedAt)+'</div>' : '<div class="metrics-updated-note">No metrics recorded yet</div>';
+    var deleteBtn = isEdit ? '<button type="button" class="btn-danger" data-action="delete-modal">Delete</button>' : '<span></span>';
+
+    postOverlay.innerHTML =
+      '<div class="panel" role="dialog" aria-modal="true">'+
+        '<h3>'+(isEdit?'Edit post':'Add post')+'</h3>'+
+        platformSection+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'+
+        '<div><label for="modalDateInput">Date</label>'+
+        '<input type="date" id="modalDateInput" value="'+modalState.date+'"></div>'+
+        '<div><label for="modalTimeInput">Post time</label>'+
+        '<input type="time" id="modalTimeInput" value="'+modalState.time+'"></div>'+
+        '</div>'+
+        fieldsHtml+
+        '<label style="margin-top:18px;">Metrics (optional)</label>'+
+        '<div class="metrics-grid">'+metricsHtml+'</div>'+
+        updatedNote+
+        '<div class="panel-actions">'+deleteBtn+
+          '<div class="right">'+
+            '<button type="button" class="btn-secondary" data-action="close-post-modal">Cancel</button>'+
+            '<button type="button" class="btn-primary" data-action="save-post-modal">Save</button>'+
+          '</div>'+
+        '</div>'+
+      '</div>';
+
+    setTimeout(function(){
+      var firstInput = postOverlay.querySelector('input[type=text], textarea');
+      if(firstInput) firstInput.focus();
+    }, 20);
+  }
+
+  function metricsChanged(oldMetrics, newMetrics){
+    var a = oldMetrics || {};
+    for(var i=0;i<METRIC_FIELDS.length;i++){
+      var k = METRIC_FIELDS[i].key;
+      var av = (a[k]===undefined) ? null : a[k];
+      var bv = (newMetrics[k]===undefined) ? null : newMetrics[k];
+      if(av !== bv) return true;
+    }
+    return false;
+  }
+
+  function saveModal(){
+    syncModalFromDom();
+    var newMetrics = {};
+    METRIC_FIELDS.forEach(function(m){
+      var raw = modalState.metrics[m.key];
+      newMetrics[m.key] = (raw===''||raw===undefined||raw===null) ? null : Number(raw);
+    });
+
+    var existing = modalState.id ? state.posts.find(function(p){ return p.id===modalState.id; }) : null;
+    var oldMetrics = existing ? existing.metrics : null;
+    var changed = metricsChanged(oldMetrics, newMetrics);
+    var metricsUpdatedAt = changed ? Date.now() : (existing ? existing.metricsUpdatedAt : null);
+
+    var payload = Object.assign({ platform: modalState.platform, date: modalState.date, time: modalState.time || '' }, modalState.fields, {
+      metrics: newMetrics,
+      metricsUpdatedAt: metricsUpdatedAt
+    });
+
+    pushHistory();
+    if(modalState.id){
+      Store.update(modalState.id, payload);
+    } else {
+      Store.add(payload);
+    }
+    closePostModal();
+    render();
+  }
+
+  // ---------- Bulk JSON Import ----------
+  var bulkState = { platform:'yt', fileName:'', data:null, errors:[], warnings:[], progress:0, phase:'' };
+
+  function isValidDateString(value){
+    if(typeof value!=='string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    var p=value.split('-').map(Number), d=new Date(p[0],p[1]-1,p[2]);
+    return d.getFullYear()===p[0] && d.getMonth()===p[1]-1 && d.getDate()===p[2];
+  }
+
+  function validateBulkJson(raw, platformKey){
+    var result={items:[],errors:[],warnings:[]}, parsed;
+    try{ parsed=JSON.parse(raw); }
+    catch(e){ result.errors.push('Invalid JSON: '+(e.message||'Could not parse the file.')); return result; }
+    if(!Array.isArray(parsed)){
+      result.errors.push('The JSON root must be an array of posts.'); return result;
+    }
+    if(parsed.length===0){ result.errors.push('The JSON file contains no posts.'); return result; }
+    var schema=schemaFor(platformKey), seen={};
+    parsed.forEach(function(item,idx){
+      var n=idx+1;
+      if(!item || typeof item!=='object' || Array.isArray(item)){ result.errors.push('Row '+n+': each item must be an object.'); return; }
+      if(!item.date) result.errors.push('Row '+n+': date is required.');
+      else if(!isValidDateString(item.date)) result.errors.push('Row '+n+': date must be a real date in YYYY-MM-DD format.');
+      if(!item.platform) result.errors.push('Row '+n+': platform is required.');
+      else if(item.platform!==platformKey) result.errors.push('Row '+n+': platform must match the selected platform ('+platformKey+').');
+      if(item.time!==undefined && item.time!==''){
+        if(typeof item.time!=='string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(item.time)) result.errors.push('Row '+n+': time must use HH:MM (24-hour) format.');
+      }
+      schema.forEach(function(f){
+        if(f.key==='contentType' && (item[f.key]===undefined || String(item[f.key]).trim()==='')){
+          result.errors.push('Row '+n+': contentType is required.');
+        }
+        if(f.type==='select' && item[f.key]!==undefined && f.options.indexOf(item[f.key])===-1){
+          result.errors.push('Row '+n+': '+f.key+' must be one of '+f.options.join(', ')+'.');
+        }
+        if(item[f.key]!==undefined && typeof item[f.key]!=='string') result.errors.push('Row '+n+': '+f.key+' must be text.');
+      });
+      var hasContent=schema.some(function(f){ return item[f.key]!==undefined && String(item[f.key]).trim()!==''; });
+      if(!hasContent) result.errors.push('Row '+n+': at least one platform content field is required.');
+      if(item.metrics!==undefined){
+        if(!item.metrics || typeof item.metrics!=='object' || Array.isArray(item.metrics)) result.errors.push('Row '+n+': metrics must be an object.');
+        else METRIC_FIELDS.forEach(function(m){
+          if(item.metrics[m.key]!==undefined && item.metrics[m.key]!==null && (item.metrics[m.key]==='' || !Number.isFinite(Number(item.metrics[m.key])) || Number(item.metrics[m.key])<0)) result.errors.push('Row '+n+': '+m.key+' must be a non-negative number.');
+        });
+      }
+      var sourceId=String(item.sourceId||item.id||'').trim();
+      var permalink=String(item.permalink||item.permalink_url||'').trim();
+      var duplicateKey=sourceId ? 'sourceId|'+sourceId : (permalink ? 'permalink|'+permalink : 'content|'+String(item.date||'')+'|'+platformKey+'|'+schema.map(function(f){return String(item[f.key]||'').trim();}).join('|'));
+      if(seen[duplicateKey]) result.errors.push('Row '+n+': duplicate of row '+seen[duplicateKey]+'.');
+      else seen[duplicateKey]=n;
+      var payload={platform:platformKey,date:item.date,time:item.time||''};
+      schema.forEach(function(f){ payload[f.key]=item[f.key]===undefined?'':String(item[f.key]); });
+      if(sourceId) payload.sourceId=sourceId;
+      if(permalink) payload.permalink=permalink;
+      payload.metrics={}; METRIC_FIELDS.forEach(function(m){ payload.metrics[m.key]=(item.metrics&&item.metrics[m.key]!==undefined&&item.metrics[m.key]!==null&&item.metrics[m.key]!=='')?Number(item.metrics[m.key]):null; });
+      payload.metricsUpdatedAt=null;
+      result.items.push(payload);
+    });
+    // Existing-record duplicates are warnings, not hard errors, so import can still be intentional.
+    result.items.forEach(function(item,idx){
+      var incomingSourceId=String(item.sourceId||'').trim();
+      var incomingPermalink=String(item.permalink||'').trim();
+      var exists=state.posts.some(function(p){
+        if(incomingSourceId && String(p.sourceId||'').trim()===incomingSourceId) return true;
+        if(incomingPermalink && String(p.permalink||'').trim()===incomingPermalink) return true;
+        if(p.platform!==item.platform || p.date!==item.date) return false;
+        return schemaFor(item.platform).every(function(f){return String(p[f.key]||'').trim()===String(item[f.key]||'').trim();});
+      });
+      if(exists) result.warnings.push('Row '+(idx+1)+': an identical post already exists and will be skipped.');
+    });
+    if(result.errors.length) result.items=[];
+    return result;
+  }
+
+  function bulkTemplate(platformKey){
+    // Keep the displayed template fully valid against validateBulkJson().
+    // The importer requires platform, date and the platform-specific schema fields.
+    var example={
+      platform:platformKey,
+      date:'2026-10-01',
+      time:'10:00'
+    };
+    schemaFor(platformKey).forEach(function(f){
+      example[f.key]=f.type==='select'?f.options[0]:'Example content';
+    });
+    example.metrics={views:0,likes:0,comments:0};
+    return JSON.stringify([example],null,2);
+  }
+
+  function openBulkImport(){
+    bulkState={platform:'yt',fileName:'',data:null,errors:[],warnings:[],progress:0,phase:''};
+    renderBulkModal(); bulkOverlay.classList.remove('hidden');
+  }
+  function closeBulkImport(){ bulkOverlay.classList.add('hidden'); bulkOverlay.innerHTML=''; }
+
+  function renderBulkModal(){
+    var result=bulkState.data;
+    var plat=platform(bulkState.platform);
+    var platformButtons=PLATFORMS.map(function(p){return '<button type="button" class="platform-pick-btn'+(bulkState.platform===p.key?' active':'')+'" data-action="bulk-platform" data-platform="'+p.key+'">'+p.name+'</button>';}).join('');
+    var status='';
+    if(bulkState.fileName && !result){
+      var pct=Math.max(0,Math.min(100,Number(bulkState.progress)||0));
+      status='<div class="bulk-progress"><div class="bulk-progress-head"><span>'+escapeHtml(bulkState.phase||'Reading file…')+'</span><span id="bulkProgressPct">'+pct+'%</span></div><div class="bulk-progress-track"><div id="bulkProgressBar" class="bulk-progress-bar" style="width:'+pct+'%"></div></div><div class="bulk-progress-meta">The file is read locally. Nothing is saved until validation succeeds.</div></div>';
+    }
+    if(result){
+      if(result.errors.length){
+        status='<div class="bulk-errors">'+result.errors.map(function(x){return '<div class="error">'+escapeHtml(x)+'</div>';}).join('')+'</div>';
+      }else{
+        status='<div class="bulk-ok"><strong>'+result.items.length+' posts ready to import.</strong> No validation errors found.</div>';
+        if(result.warnings.length) status+='<div class="bulk-errors" style="margin-top:8px">'+result.warnings.map(function(x){return '<div class="error">'+escapeHtml(x)+'</div>';}).join('')+'</div>';
+      }
+      status='<div class="bulk-summary"><span class="bulk-stat"><strong>'+result.items.length+'</strong> valid</span><span class="bulk-stat"><strong>'+result.errors.length+'</strong> errors</span><span class="bulk-stat"><strong>'+result.warnings.length+'</strong> warnings</span></div>'+status;
+    }
+    var disabled=!(result && !result.errors.length && result.items.length);
+    bulkOverlay.innerHTML='<div class="panel" role="dialog" aria-modal="true">'+
+      '<h3>Bulk Import JSON</h3><div class="sub">Import multiple '+plat.name+' posts at once. Nothing is saved until validation passes.</div>'+
+      '<label>Platform</label><div class="platform-picker">'+platformButtons+'</div>'+
+      '<label>JSON file</label><label class="file-drop"><input id="bulkFileInput" type="file" accept="application/json,.json"><strong>Choose JSON file</strong><span>'+ (bulkState.fileName?escapeHtml(bulkState.fileName):'Expected: an array of post objects') +'</span></label>'+
+      status+
+      '<label>Expected format</label><div class="json-code">'+escapeHtml(bulkTemplate(bulkState.platform))+'</div>'+
+      '<div class="panel-actions"><button type="button" class="btn-secondary" data-action="close-bulk">Cancel</button><div class="right"><button type="button" class="btn-primary" data-action="confirm-bulk" '+(disabled?'disabled style="opacity:.45;cursor:not-allowed"':'')+'>Import '+(result&&!result.errors.length?result.items.length:0)+' Posts</button></div></div>'+
+      '</div>';
+  }
+
+  function readBulkFile(file){
+    if(!file){return;}
+    bulkState.fileName=file.name; bulkState.data=null; bulkState.progress=0; bulkState.phase='Reading file…';
+    renderBulkModal();
+    showToast('Reading JSON','Opening '+file.name+'…','info',2200);
+    var reader=new FileReader();
+    reader.onprogress=function(e){
+      if(e.lengthComputable){
+        var pct=Math.round((e.loaded/e.total)*80);
+        bulkState.progress=pct; bulkState.phase='Reading file…';
+        var bar=document.getElementById('bulkProgressBar'), label=document.getElementById('bulkProgressPct');
+        if(bar) bar.style.width=pct+'%';
+        if(label) label.textContent=pct+'%';
+      }
+    };
+    reader.onload=function(e){
+      bulkState.progress=85; bulkState.phase='Validating JSON…';
+      var bar=document.getElementById('bulkProgressBar'), label=document.getElementById('bulkProgressPct');
+      if(bar) bar.style.width='85%'; if(label) label.textContent='85%';
+      // Let the browser paint the progress state before validating a large file.
+      setTimeout(function(){
+        try{
+          bulkState.data=validateBulkJson(String(e.target.result||''),bulkState.platform);
+          bulkState.progress=100; bulkState.phase=bulkState.data.errors.length?'Validation failed':'Validation complete';
+          renderBulkModal();
+          if(bulkState.data.errors.length){
+            showToast('Validation failed',bulkState.data.errors.length+' error'+(bulkState.data.errors.length===1?'':'s')+' found. Nothing was imported.','error',6000);
+          }else{
+            showToast('JSON validated',bulkState.data.items.length+' post'+(bulkState.data.items.length===1?'':'s')+' ready to import.','success',3200);
+          }
+        }catch(err){
+          bulkState.data={items:[],errors:['Unexpected validation error: '+(err.message||String(err))],warnings:[]};
+          bulkState.progress=100; bulkState.phase='Validation failed';
+          renderBulkModal();
+          showToast('Import error','The JSON could not be validated. Nothing was imported.','error',6000);
+        }
+      },30);
+    };
+    reader.onerror=function(){
+      bulkState.data={items:[],errors:['Could not read the selected file. Check that the file is accessible and is a valid JSON file.'],warnings:[]};
+      bulkState.progress=100; bulkState.phase='File read failed';
+      renderBulkModal();
+      showToast('File read failed','The JSON file could not be read. Nothing was imported.','error',6000);
+    };
+    reader.onabort=function(){
+      bulkState.data={items:[],errors:['File reading was cancelled.'],warnings:[]};
+      bulkState.progress=0; bulkState.phase='Cancelled';
+      renderBulkModal();
+      showToast('Import cancelled','No posts were imported.','warning',3000);
+    };
+    reader.readAsText(file);
+  }
+
+  function confirmBulkImport(){
+    var result=bulkState.data; if(!result || result.errors.length || !result.items.length) return;
+    var added=0, skipped=0;
+    var historyPushed=false;
+    result.items.forEach(function(item){
+      var incomingSourceId=String(item.sourceId||'').trim();
+      var incomingPermalink=String(item.permalink||'').trim();
+      var exists=state.posts.some(function(p){
+        if(incomingSourceId && String(p.sourceId||'').trim()===incomingSourceId) return true;
+        if(incomingPermalink && String(p.permalink||'').trim()===incomingPermalink) return true;
+        if(p.platform!==item.platform || p.date!==item.date) return false;
+        return schemaFor(item.platform).every(function(f){return String(p[f.key]||'').trim()===String(item[f.key]||'').trim();});
+      });
+      if(exists){skipped++;return;}
+      if(!historyPushed){pushHistory();historyPushed=true;}
+      Store.add(item); added++;
+    });
+    closeBulkImport(); render();
+    showToast('Import complete', added+' post'+(added===1?'':'s')+' added'+(skipped?' · '+skipped+' duplicate(s) skipped':'')+'.','success',4200);
+  }
+
+  // ---------- Events ----------
+  function jumpToTablePost(targetId, targetPlatform){
+    targetId=String(targetId||'');
+    targetPlatform=String(targetPlatform||'');
+    if(!targetId || !targetPlatform) return;
+    if(!PLATFORMS.some(function(p){return p.key===targetPlatform;})) return;
+
+    // Switch to Tables and the exact platform immediately.
+    state.currentTableTab=targetPlatform;
+    state.view='tables';
+    document.querySelectorAll('.cal-platform-group.open').forEach(function(g){g.classList.remove('open'); var c=g.closest('.cal-cell'); if(c)c.classList.remove('cal-cell-open','cal-cell-preview-open');});
+    render();
+
+    // Locate the exact row after the table has been rendered.
+    setTimeout(function(){
+      var rows=document.querySelectorAll('[data-post-row]');
+      var targetRow=null;
+      for(var i=0;i<rows.length;i++){
+        if(String(rows[i].getAttribute('data-post-row'))===targetId){
+          targetRow=rows[i];
+          break;
+        }
+      }
+      if(targetRow){
+        targetRow.scrollIntoView({behavior:'smooth',block:'center'});
+        targetRow.classList.add('row-highlight');
+        setTimeout(function(){targetRow.classList.remove('row-highlight');},2200);
+      }
+    },50);
+
+    var pl=platform(targetPlatform);
+    showToast('Opened table', 'Jumped to the selected '+(pl?pl.name:'')+' post.', 'info', 2200);
+  }
+
+  function syncUrlState(){
+    try{
+      var params=new URLSearchParams();
+      params.set('view',state.view);
+      if(state.view==='calendar') params.set('month',state.currentMonth.year+'-'+String(state.currentMonth.month+1).padStart(2,'0'));
+      if(state.view==='tables'){params.set('platform',state.currentTableTab);if(state.tableSearch)params.set('q',state.tableSearch);}
+      if(state.view==='metrics') params.set('metricTab',state.metricsTab);
+      history.replaceState(null,'','#'+params.toString());
+    }catch(e){}
+  }
+  function loadUrlState(){
+    try{
+      var raw=location.hash.replace(/^#/,''); if(!raw)return;
+      var p=new URLSearchParams(raw), v=p.get('view');
+      if(v==='calendar'||v==='tables'||v==='metrics') state.view=v;
+      var m=p.get('month'); if(m&&/^\d{4}-\d{2}$/.test(m)){var mp=m.split('-').map(Number);state.currentMonth={year:mp[0],month:mp[1]-1};}
+      var plat=p.get('platform'); if(plat==='all'||PLATFORMS.some(function(x){return x.key===plat;}))state.currentTableTab=plat;
+      var q=p.get('q'); if(q)state.tableSearch=q;
+      var mt=p.get('metricTab'); if(mt)state.metricsTab=mt;
+    }catch(e){}
+  }
+
+  function downloadFile(name, content, mime){
+    var blob=new Blob([content],{type:mime||'text/plain;charset=utf-8'}), url=URL.createObjectURL(blob), a=document.createElement('a');
+    a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url);},500);
+  }
+  function exportPosts(format){
+    var posts=tableFilteredPosts();
+    if(!posts.length){showToast('Nothing to export','No posts match the current filters.','info',2200);return;}
+    if(format==='json'){
+      downloadFile('social-planner-export.json',JSON.stringify(posts,null,2),'application/json');
+    }else{
+      var rows=[['Platform','Date','Time','Status','Content Type','Content','Views','Likes','Comments']];
+      posts.forEach(function(p){rows.push([platform(p.platform).name,p.date,p.time||'',getStatus(p.date),p.contentType||'',getPreview(p),metricNumber(p,'views'),metricNumber(p,'likes'),metricNumber(p,'comments')]);});
+      var csv=rows.map(function(r){return r.map(function(v){var x=String(v==null?'':v).replace(/"/g,'""');return '"'+x+'"';}).join(',');}).join('\r\n');
+      downloadFile('social-planner-export.csv',csv,'text/csv;charset=utf-8');
+    }
+    showToast('Export complete',posts.length+' post'+(posts.length===1?'':'s')+' exported.','success',2200);
+  }
+
+  function bindGlobalEvents(){
+    // Dedicated calendar delegation. This is intentionally separate from the
+    // global handler so clicks on preview buttons cannot be swallowed by the
+    // calendar day/platform handlers.
+    calendarRoot.addEventListener('click', function(e){
+      var item=e.target.closest('[data-action="jump-table"]');
+      if(!item) return;
+      e.preventDefault();
+      e.stopPropagation();
+      jumpToTablePost(item.getAttribute('data-id'), item.getAttribute('data-platform'));
+    });
+
+    function positionCalendarPreview(group){
+      if(!group) return;
+      var btn=group.querySelector('.cal-platform-btn');
+      var preview=group.querySelector('.cal-preview');
+      if(!btn || !preview) return;
+      var r=btn.getBoundingClientRect();
+      var vw=window.innerWidth, vh=window.innerHeight;
+      var gap=6, width=Math.min(270, vw-28);
+      preview.style.width=width+'px';
+      preview.style.maxWidth=width+'px';
+      // Temporarily show the preview only for measurement. Do not leave an
+      // inline display:block here, otherwise every preview that has ever been
+      // hovered remains visible at once.
+      var previousDisplay=preview.style.display;
+      var previousVisibility=preview.style.visibility;
+      preview.style.visibility='hidden';
+      preview.style.display='block';
+      var h=Math.min(preview.scrollHeight, 360);
+      var left=Math.max(14, Math.min(r.left, vw-width-14));
+      var top=r.bottom+gap;
+      if(top+h > vh-14) top=Math.max(14, r.top-h-gap);
+      preview.style.left=Math.round(left)+'px';
+      preview.style.top=Math.round(top)+'px';
+      preview.style.display=previousDisplay;
+      preview.style.visibility=previousVisibility;
+    }
+
+    document.body.addEventListener('mouseover', function(e){
+      var group=e.target.closest('.cal-platform-group');
+      if(!group) return;
+      var cell=group.closest('.cal-cell');
+      if(cell) cell.classList.add('cal-cell-preview-open');
+      positionCalendarPreview(group);
+    });
+    document.body.addEventListener('mouseout', function(e){
+      var group=e.target.closest('.cal-platform-group');
+      if(!group) return;
+      var related=e.relatedTarget;
+      if(related && group.contains(related)) return;
+      var cell=group.closest('.cal-cell');
+      if(cell && !group.classList.contains('open')) cell.classList.remove('cal-cell-preview-open');
+    });
+    window.addEventListener('resize', function(){
+      document.querySelectorAll('.cal-platform-group:hover, .cal-platform-group.open').forEach(positionCalendarPreview);
+    });
+    document.addEventListener('scroll', function(){
+      document.querySelectorAll('.cal-platform-group:hover, .cal-platform-group.open').forEach(positionCalendarPreview);
+    }, true);
+
+    document.body.addEventListener('click', function(e){
+      var el;
+      if(!e.target.closest('.cal-platform-group')) document.querySelectorAll('.cal-platform-group.open').forEach(function(g){g.classList.remove('open'); var c=g.closest('.cal-cell'); if(c)c.classList.remove('cal-cell-open','cal-cell-preview-open');});
+
+      if((el = e.target.closest('[data-action="calendar-platform"]'))){
+        e.preventDefault();
+        e.stopPropagation();
+        var group=el.closest('.cal-platform-group');
+        if(group){
+          var wasOpen=group.classList.contains('open');
+          document.querySelectorAll('.cal-platform-group.open').forEach(function(g){g.classList.remove('open'); var c=g.closest('.cal-cell'); if(c)c.classList.remove('cal-cell-open','cal-cell-preview-open');});
+          if(!wasOpen){ group.classList.add('open'); var cell=group.closest('.cal-cell'); if(cell)cell.classList.add('cal-cell-open'); positionCalendarPreview(group); }
+        }
+        return;
+      }
+      if((el = e.target.closest('[data-action="day"]'))){
+        if(e.target.closest('.cal-platform-group')) return;
+        openDetailPanel(el.dataset.date);
+        return;
+      }
+      if(e.target.closest('[data-action="prev-month"]')){ navMonth(-1); return; }
+      if(e.target.closest('[data-action="next-month"]')){ navMonth(1); return; }
+      if(e.target.closest('[data-action="today"]')){ goToday(); return; }
+      if(e.target.closest('[data-action="add-post"]')){ openPostModal({}); return; }
+      if(e.target.closest('[data-action="bulk-import"]')){ openBulkImport(); return; }
+      if((el = e.target.closest('[data-action="add-post-for-date"]'))){
+        closeDetailPanel();
+        openPostModal({ date: el.dataset.date });
+        return;
+      }
+      if((el = e.target.closest('[data-action="jump-table"]'))){
+        e.preventDefault();
+        e.stopPropagation();
+        jumpToTablePost(el.getAttribute('data-id'), el.getAttribute('data-platform'));
+        return;
+      }
+      if((el = e.target.closest('[data-action="view"]'))){
+        state.view = el.dataset.view;
+        render();
+        return;
+      }
+      if((el = e.target.closest('[data-action="table-tab"]'))){
+        state.currentTableTab = el.dataset.platform;
+        state.tableContentType = 'all';
+        render();
+        return;
+      }
+      if((el = e.target.closest('[data-action="metrics-tab"]'))){
+        state.metricsTab = el.dataset.platform;
+        state.view = 'metrics';
+        render();
+        return;
+      }
+      if((el = e.target.closest('tr[data-post-row]'))){
+        if(e.target.closest('[data-row-control="true"]') || e.target.closest('button') || e.target.closest('input')) return;
+        var tablePost = state.posts.find(function(p){ return p.id===el.dataset.postRow; });
+        if(tablePost){ openTablePostDetail(tablePost); }
+        return;
+      }
+      if((el = e.target.closest('[data-action="sort-direction"]'))){state.tableSortDir=state.tableSortDir==='desc'?'asc':'desc';render();return;}
+      if((el = e.target.closest('[data-action="clear-table-filters"]'))){state.tableSearch='';state.tableContentType='all';state.tableStatus='all';state.tableSort='date';state.tableSortDir='asc';render();return;}
+      if((el = e.target.closest('[data-action="export-json"]'))){exportPosts('json');return;}
+      if((el = e.target.closest('[data-action="export-csv"]'))){exportPosts('csv');return;}
+      if((el = e.target.closest('[data-action="print-table"]'))){window.print();return;}
+      if((el = e.target.closest('[data-action="edit-post"]'))){
+        var post = state.posts.find(function(p){ return p.id===el.dataset.id; });
+        if(post){
+          closeDetailPanel();
+          openPostModal(post);
+        }
+        return;
+      }
+      if((el=e.target.closest('[data-action="enter-delete-mode"]'))){ state.selectionMode=true; clearSelection(); render(); return; }
+      if((el=e.target.closest('[data-action="exit-delete-mode"]'))){ state.selectionMode=false; clearSelection(); render(); return; }
+      if((el=e.target.closest('[data-action="delete-selected"]'))){ deleteSelectedPosts(); return; }
+      if((el=e.target.closest('[data-action="delete-post"]'))){
+        deletePostById(el.getAttribute('data-id'));
+        return;
+      }
+      if(e.target.closest('[data-action="close-detail"]')){ closeDetailPanel(); return; }
+      if(e.target.id === 'detailOverlay'){ closeDetailPanel(); return; }
+
+      if((el = e.target.closest('[data-action="pick-platform"]'))){ pickPlatform(el.dataset.platform); return; }
+      if((el = e.target.closest('[data-action="bulk-platform"]'))){
+        bulkState.platform=el.dataset.platform; bulkState.fileName=''; bulkState.data=null; renderBulkModal(); return;
+      }
+      if(e.target.closest('[data-action="close-bulk"]')){ closeBulkImport(); return; }
+      if(e.target.closest('[data-action="confirm-bulk"]')){ confirmBulkImport(); return; }
+      if(e.target.closest('[data-action="close-post-modal"]')){ closePostModal(); return; }
+      if(e.target.closest('[data-action="save-post-modal"]')){ saveModal(); return; }
+      if(e.target.closest('[data-action="delete-modal"]')){
+        if(modalState.id) deletePostById(modalState.id);
+        return;
+      }
+      if(e.target.id === 'postOverlay'){ closePostModal(); return; }
+    });
+
+    document.body.addEventListener('input', function(e){
+      if(e.target.id === 'tableSearch'){
+        state.tableSearch=e.target.value;
+        render();
+        setTimeout(function(){var q=document.getElementById('tableSearch');if(q){q.focus();q.setSelectionRange(q.value.length,q.value.length);}},0);
+      }
+    });
+
+    document.body.addEventListener('change', function(e){
+      if(e.target.matches('[data-action="select-post"]')){
+        var id=e.target.dataset.id;
+        if(e.target.checked) state.selectedPosts[id]=true; else delete state.selectedPosts[id];
+        render(); return;
+      }
+      if(e.target.matches('[data-action="select-all-visible"]')){
+        var boxes=document.querySelectorAll('[data-action="select-post"]');
+        for(var i=0;i<boxes.length;i++){var id2=boxes[i].dataset.id;if(e.target.checked)state.selectedPosts[id2]=true;else delete state.selectedPosts[id2];}
+        render(); return;
+      }
+      if(e.target.id === 'bulkFileInput'){
+        var file=e.target.files && e.target.files[0];
+        if(file) readBulkFile(file);
+        return;
+      }
+      if(e.target.id === 'tableSearch'){ state.tableSearch=e.target.value; render(); setTimeout(function(){var q=document.getElementById('tableSearch');if(q){q.focus();q.setSelectionRange(q.value.length,q.value.length);}},0); return; }
+      if(e.target.id === 'tableContentType'){ state.tableContentType=e.target.value; render(); return; }
+      if(e.target.id === 'tableStatus'){ state.tableStatus=e.target.value; render(); return; }
+      if(e.target.id === 'tableSort'){ state.tableSort=e.target.value; render(); return; }
+      if(e.target.id === 'analysisMetric'){ state.analysisMetric=e.target.value; render(); return; }
+      if(e.target.id === 'analysisDimension'){ state.analysisDimension=e.target.value; render(); return; }
+    });
+
+    calendarRoot.addEventListener('dragstart', function(e){
+      var item=e.target.closest('[data-drag-post]'); if(!item)return;
+      state.dragPostId=item.getAttribute('data-drag-post'); item.classList.add('dragging');
+      if(e.dataTransfer){e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',state.dragPostId);}
+    });
+    calendarRoot.addEventListener('dragend', function(e){var item=e.target.closest('[data-drag-post]');if(item)item.classList.remove('dragging');calendarRoot.querySelectorAll('.drag-over').forEach(function(c){c.classList.remove('drag-over');});state.dragPostId=null;});
+    calendarRoot.addEventListener('dragover', function(e){var cell=e.target.closest('.cal-cell');if(!cell)return;e.preventDefault();cell.classList.add('drag-over');if(e.dataTransfer)e.dataTransfer.dropEffect='move';});
+    calendarRoot.addEventListener('dragleave', function(e){var cell=e.target.closest('.cal-cell');if(cell && !cell.contains(e.relatedTarget))cell.classList.remove('drag-over');});
+    calendarRoot.addEventListener('drop', function(e){
+      var cell=e.target.closest('.cal-cell'); if(!cell)return; e.preventDefault();cell.classList.remove('drag-over');
+      var id=(e.dataTransfer&&e.dataTransfer.getData('text/plain'))||state.dragPostId; if(!id)return;
+      var post=state.posts.find(function(p){return String(p.id)===String(id);}); if(!post||cell.classList.contains('cal-cell-dim'))return;
+      var newDate=cell.getAttribute('data-date'); if(!newDate||post.date===newDate)return;
+      pushHistory(); Store.update(post.id,{date:newDate}); state.currentMonth={year:Number(newDate.slice(0,4)),month:Number(newDate.slice(5,7))-1}; render(); showToast('Post rescheduled','Moved to '+prettyDateShort(newDate)+'.','success',2400);
+    });
+
+    document.addEventListener('keydown', function(e){
+      if(e.key==='Escape'){
+        if(!postOverlay.classList.contains('hidden')) closePostModal();
+        else if(!bulkOverlay.classList.contains('hidden')) closeBulkImport();
+        else if(!detailOverlay.classList.contains('hidden')) closeDetailPanel();
+        return;
+      }
+      var tag=(e.target.tagName||'').toLowerCase();
+      if(tag==='input'||tag==='textarea'||tag==='select'||e.target.isContentEditable) return;
+      if(state.view==='calendar' && !document.querySelector('.overlay:not(.hidden)')){
+        if(e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key==='ArrowUp'||e.key==='ArrowDown'||e.key==='Enter') e.preventDefault();
+        if(e.key==='ArrowLeft'||e.key==='ArrowRight'||e.key==='ArrowUp'||e.key==='ArrowDown'){
+          var base=state.focusDate?new Date(state.focusDate+'T12:00:00'):new Date();var delta=e.key==='ArrowLeft'?-1:e.key==='ArrowRight'?1:e.key==='ArrowUp'?-7:7;base.setDate(base.getDate()+delta);state.focusDate=formatDate(base);var target=new Date(base.getFullYear(),base.getMonth(),1);state.currentMonth={year:target.getFullYear(),month:target.getMonth()};render();setTimeout(function(){var cell=document.querySelector('.cal-cell[data-date="'+state.focusDate+'"]');if(cell)cell.focus();},0);return;
+        }
+        if(e.key==='Enter'){var cell=document.querySelector('.cal-cell[data-date="'+state.focusDate+'"]');if(cell)openDetailPanel(state.focusDate);return;}
+      }
+      if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();if(e.shiftKey)redoChange();else undoChange();}
+      if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();redoChange();}
+    });
+  }
+
+  // ---------- Init ----------
+  document.addEventListener('DOMContentLoaded', function(){
+    cacheDom();
+    bindGlobalEvents();
+    Store.load();
+    loadUrlState();
+    render();
+    setTimeout(function(){
+      if(appBoot) appBoot.classList.add('hide');
+      showToast('Planner ready', state.posts.length+' saved post'+(state.posts.length===1?'':'s')+' loaded from this browser.','success',2800);
+    },260);
+  });
+
+  window.addEventListener('error', function(e){
+    if(e && e.error){ console.error(e.error); }
+    showToast('Something went wrong','An unexpected error occurred. Check the browser console for details.','error',6000);
+  });
+})();
+</script>
+</body>
+</html>
