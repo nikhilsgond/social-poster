@@ -6,6 +6,7 @@
 import type { Post } from "../types";
 import type { PlatformPublisher, PublishResult } from "./publishers/interface";
 import { getFacebookPublisher } from "./publishers/facebook";
+import { getThreadsPublisher } from "./publishers/threads";
 import { logWarn, logError } from "../lib/logger";
 
 // Facebook credentials from server environment (read dynamically at runtime)
@@ -14,6 +15,14 @@ function getFacebookPageId(): string {
 }
 function getFacebookPageToken(): string {
   return process.env.META_PAGE_ACCESS_TOKEN || "";
+}
+
+// Threads credentials from server environment (read dynamically at runtime)
+function getThreadsUserId(): string {
+  return process.env.THREADS_USER_ID || "";
+}
+function getThreadsAccessToken(): string {
+  return process.env.THREAD_ACCESS_TOKEN || "";
 }
 
 export async function routePublisher(post: Post): Promise<PublishResult> {
@@ -50,9 +59,16 @@ function selectPublisher(platform: string): PlatformPublisher | null {
       }
       logWarn("Facebook credentials not configured in environment");
       return null;
+    case "th":
+      const threadsUserId = getThreadsUserId();
+      const threadsToken = getThreadsAccessToken();
+      if (threadsUserId && threadsToken) {
+        return getThreadsPublisher(threadsUserId, threadsToken);
+      }
+      logWarn("Threads credentials not configured in environment");
+      return null;
     case "yt":
     case "ig":
-    case "th":
     case "li":
     case "x":
       return null; // Future integrations
