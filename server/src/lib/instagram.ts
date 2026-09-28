@@ -4,7 +4,7 @@
 // Implements media container creation and publishing.
 // Never logs access tokens or secrets.
 
-const GRAPH_API_VERSION = "v19.0";
+const GRAPH_API_VERSION = "v26.0";
 const BASE_URL = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
 
 export interface InstagramConfig {

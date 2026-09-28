@@ -4,7 +4,7 @@
 // Uses server-side Page Access Token only.
 // Never logs the token.
 
-const GRAPH_API_VERSION = "v19.0";
+const GRAPH_API_VERSION = "v26.0";
 const BASE_URL = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
 
 export interface FacebookConfig {

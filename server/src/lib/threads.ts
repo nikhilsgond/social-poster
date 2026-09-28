@@ -4,7 +4,7 @@
 // Implements media container creation and publishing.
 // Never logs access tokens or secrets.
 
-const BASE_URL = "https://graph.threads.net";
+const BASE_URL = "https://graph.threads.net/v1.0";
 
 export interface ThreadsConfig {
   userId: string;
