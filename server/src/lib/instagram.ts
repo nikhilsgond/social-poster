@@ -11,7 +11,7 @@
 // Authentication uses Authorization: Bearer <token> header.
 // POST body is JSON. Media URLs must be publicly accessible.
 
-import { logInfo } from "./logger";
+import { logInfo, logWarn } from "./logger";
 
 const GRAPH_API_VERSION = "v26.0";
 const BASE_URL = `https://graph.instagram.com/${GRAPH_API_VERSION}`;
@@ -50,6 +50,77 @@ export class InstagramApiError extends Error {
 
 // ── Instagram Graph API Client ──
 
+// ── Story video size limit (official Meta docs: 8MB for video Stories) ──
+const STORY_VIDEO_MAX_BYTES = 8 * 1024 * 1024; // 8MB
+
+// Determine if a Story content type indicates a video Story.
+// Uses the original Post contentType from the scheduled post.
+// "StoryVideo" or "StoryVideo" → true (video Story)
+// "StoryImage", "Story", "Stories" → false (image Story)
+// Does NOT use URL extension guessing.
+// Returns false for any content type that does not clearly indicate a video Story,
+// so image Stories are never silently converted.
+function isStoryVideoContentType(contentType: string | undefined): boolean {
+  const upper = (contentType || "").toUpperCase();
+  // Only returns true if the content type explicitly indicates video
+  return upper.includes("VIDEO");
+}
+
+// Validate Story media requirements before creating a container.
+// For video Stories, attempts to enforce the official 8MB file size limit.
+// If Content-Length cannot be determined, the validation is skipped (fail open)
+// rather than incorrectly rejecting a valid Story. Meta will reject at the
+// API level if the file is too large.
+// Returns { isValid: true } if validation passes or cannot be performed.
+// Returns { isValid: false } only if validation definitively fails.
+export async function validateStoryMedia(
+  mediaUrl: string | undefined,
+  contentType: string | undefined
+): Promise<{ isValid: boolean; isVideo: boolean; error?: string }> {
+  if (!mediaUrl) {
+    return { isValid: false, isVideo: false, error: "Story mediaUrl is required" };
+  }
+
+  // Reject ambiguous content types that don't clearly indicate image or video
+  const upper = (contentType || "").toUpperCase();
+  if (upper === "STORY" || upper === "STORIES") {
+    return {
+      isValid: false,
+      isVideo: false,
+      error: `Story content type "${contentType}" is ambiguous. Use "StoryImage" or "StoryVideo" to specify the media type explicitly.`,
+    };
+  }
+
+  const isVideo = isStoryVideoContentType(contentType);
+
+  // For video Stories, attempt to enforce the official 8MB size limit
+  if (isVideo) {
+    try {
+      const headResponse = await fetch(mediaUrl, { method: "HEAD" });
+      const contentLength = headResponse.headers.get("content-length");
+      const sizeBytes = contentLength ? parseInt(contentLength, 10) : 0;
+
+      if (sizeBytes > STORY_VIDEO_MAX_BYTES) {
+        return {
+          isValid: false,
+          isVideo: true,
+          error: `Story video exceeds 8MB limit (${(sizeBytes / 1024 / 1024).toFixed(1)}MB). Reduce file size before scheduling.`,
+        };
+      }
+
+      if (!contentLength) {
+        logWarn("Story video size validation skipped — Content-Length not available, proceeding with validation at Meta's end");
+      }
+    } catch {
+      // HEAD request failed (network error, CDN issue, etc.).
+      // Do not reject the Story — proceed and let Meta handle validation.
+      logWarn("Story video size validation skipped — could not fetch Content-Length, proceeding");
+    }
+  }
+
+  return { isValid: true, isVideo };
+}
+
 export class InstagramGraphClient {
   private config: InstagramConfig;
 
@@ -59,7 +130,7 @@ export class InstagramGraphClient {
 
   // ── Internal request handler ──
   // For graph.instagram.com:
-  // POST requests use JSON body + Authorization: Bearer <token> header
+  // POST requests use JSON body + Authorization: Bearer *** header
   // GET requests use query params for fields
 
   private async request(
@@ -114,43 +185,51 @@ export class InstagramGraphClient {
   }
 
   // ── Create media container ──
-  // Instagram API: POST https://graph.instagram.com/v26.0/{userId}/media
-  // Official reference: https://developers.facebook.com/docs/instagram-platform/
-  //
-  // For images: image_url, media_type=IMAGE
-  // For videos: video_url, media_type=VIDEO
-  // For reels:  video_url, media_type=REELS, share_to_feed
-  // For carousels: media_type=CAROUSEL, children (comma-separated child IDs)
-  // POST body is JSON with Authorization: Bearer <token> header.
-  // Media URLs must be publicly accessible — Meta cURLs them.
+    // Instagram API: POST https://graph.instagram.com/v26.0/{userId}/media
+    // Official reference: https://developers.facebook.com/docs/instagram-platform/
+    //
+    // For images: image_url, media_type=IMAGE
+    // For videos: video_url, media_type=VIDEO
+    // For reels:  video_url, media_type=REELS, share_to_feed
+    // For stories: image_url or video_url, media_type=STORIES (determined by isVideoStory)
+    // For carousels: media_type=CAROUSEL, children (comma-separated child IDs)
+    // POST body is JSON with Authorization: Bearer *** header.
+    // Media URLs must be publicly accessible — Meta cURLs them.
 
-  async createMediaContainer(
-    caption: string,
-    mediaUrl?: string,
-    contentType?: string,
-    children?: string[]
-  ): Promise<InstagramContainerResult> {
-    const mediaType = (contentType || "IMAGE").toUpperCase();
-    const params: Record<string, string> = {
-      caption,
-      media_type: mediaType,
-    };
+    async createMediaContainer(
+      caption: string,
+      mediaUrl?: string,
+      contentType?: string,
+      children?: string[],
+      isVideoStory?: boolean
+    ): Promise<InstagramContainerResult> {
+      const mediaType = (contentType || "IMAGE").toUpperCase();
+      const params: Record<string, string> = {
+        caption,
+        media_type: mediaType,
+      };
 
-    // Carousel: use children parameter with comma-separated child container IDs
-    if (mediaType === "CAROUSEL_ALBUM" && children && children.length > 0) {
-      params.children = children.join(",");
-    } else if (mediaUrl) {
-      // IMAGE, VIDEO, and REELS all use video_url for video/reel content
-      if (mediaType === "VIDEO" || mediaType === "REELS") {
-        params.video_url = mediaUrl;
-        // Reels-specific optional parameters
-        if (mediaType === "REELS") {
-          params.share_to_feed = "false";
+      // Carousel: use children parameter with comma-separated child container IDs
+      if (mediaType === "CAROUSEL_ALBUM" && children && children.length > 0) {
+        params.children = children.join(",");
+      } else if (mediaUrl) {
+        // IMAGE and non-video Stories use image_url; VIDEO, REELS, and video Stories use video_url
+        if (mediaType === "VIDEO" || mediaType === "REELS") {
+          params.video_url = mediaUrl;
+          // Reels-specific optional parameters
+          if (mediaType === "REELS") {
+            params.share_to_feed = "false";
+          }
+        } else if (mediaType === "STORIES") {
+          if (isVideoStory) {
+            params.video_url = mediaUrl;
+          } else {
+            params.image_url = mediaUrl;
+          }
+        } else {
+          params.image_url = mediaUrl;
         }
-      } else {
-        params.image_url = mediaUrl;
       }
-    }
 
     try {
       const data = await this.request(
@@ -172,16 +251,16 @@ export class InstagramGraphClient {
 
   // ── Check container status ──
   // Instagram API: GET /{containerId}?fields=status_code
-  // Before publishing, especially for video/Reels/Carousels,
+  // Before publishing, especially for video/Reels/Carousels and Stories,
   // the container must be in a ready state. Meta may need time to process.
-  // Status codes: IN_PROGRESS, PROCESSING, FINISHED, READY, ERROR
-  // Polls every 5 seconds, maximum 120 seconds total.
+  // Status codes: IN_PROGRESS, PROCESSING, FINISHED, READY, ERROR, EXPIRED
+  // Polls every 30 seconds, maximum 180 seconds total.
 
   async checkContainerStatus(
     containerId: string
   ): Promise<{ ready: boolean; status: string; error?: string }> {
-    const maxWaitMs = 120_000;
-    const pollIntervalMs = 5_000;
+    const maxWaitMs = 180_000;
+    const pollIntervalMs = 30_000;
     const startTime = Date.now();
     let attempt = 0;
 
@@ -205,11 +284,12 @@ export class InstagramGraphClient {
           return { ready: true, status };
         }
 
-        if (status === "ERROR") {
+        // EXPIRED or ERROR → fail immediately
+        if (status === "ERROR" || status === "EXPIRED") {
           return {
             ready: false,
             status,
-            error: "Container processing failed",
+            error: `Container ${status.toLowerCase()}: ${status === "EXPIRED" ? "Container expired before processing completed." : "Container processing failed."}`,
           };
         }
 

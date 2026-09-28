@@ -1,7 +1,7 @@
 // server/src/platforms/publishers/instagram.ts
 // Real Instagram publisher.
 // Uses the Instagram Graph API client to publish image, video, reel,
-// and carousel posts.
+// story, and carousel posts.
 // The Instagram client (src/lib/instagram.ts) is completely isolated from the
 // Threads client (src/lib/threads.ts) and Facebook client (src/lib/facebook.ts).
 // Separate host, endpoints, parameters, tokens, and error types.
@@ -10,17 +10,25 @@
 //
 // Media URLs must be publicly accessible — Meta cURLs the URL from the server.
 // Private URLs (Google Drive, localhost, etc.) will fail.
+// Stories use media_type=STORIES and support image_url or video_url
+// based on the Post content type (not URL extension).
+// Stories expire after 24 hours. No interactive stickers via API.
+// Video Stories are validated against the official 8MB limit before container creation.
 
 import type { Post } from "../../types";
 import type { PlatformPublisher, PublishResult } from "./interface";
-import { InstagramGraphClient } from "../../lib/instagram";
+import {
+  InstagramGraphClient,
+  validateStoryMedia,
+} from "../../lib/instagram";
 import { logInfo, logWarn, logError } from "../../lib/logger";
 
 // ── Instagram media_type mapping ──
 // Social Planner uses internal content types (e.g. "Image", "Video", "Carousel").
-// Instagram API requires: IMAGE, VIDEO, REELS, CAROUSEL_ALBUM.
+// Instagram API requires: IMAGE, VIDEO, REELS, CAROUSEL_ALBUM, STORIES.
 // This mapping validates and converts the planner type to the Instagram API type.
 // Unsupported values throw a local error before calling the API.
+// Stories use media_type=STORIES and support image_url or video_url.
 
 function mapToInstagramMediaType(contentType: string | undefined): string {
   const upper = (contentType || "").toUpperCase();
@@ -35,6 +43,16 @@ function mapToInstagramMediaType(contentType: string | undefined): string {
     case "CAROUSEL_ALBUM":
     case "CAROUSEL":
       return "CAROUSEL_ALBUM";
+    case "STORY":
+    case "STORIES":
+      // Ambiguous — rejected by validateStoryMedia at publish time
+      return "STORIES";
+    case "STORY_IMAGE":
+    case "STORYIMAGE":
+      return "STORIES"; // image Story (isVideoStory = false)
+    case "STORY_VIDEO":
+    case "STORYVIDEO":
+      return "STORIES"; // video Story (isVideoStory = true)
     default:
       throw new Error(
         `Unsupported Instagram content type: ${contentType || "(empty)"}`
@@ -74,12 +92,35 @@ export class InstagramPublisher implements PlatformPublisher {
       // For carousels, extract child container IDs from the post data if available
       const children = post.carouselChildren ?? [];
 
+      // Step 0: Validate Story media before creating container
+      // For video Stories, enforce the official 8MB size limit
+      // For image Stories, just ensure a valid mediaUrl exists
+      let isVideoStory: boolean | undefined;
+      if (instagramMediaType === "STORIES") {
+        const validation = await validateStoryMedia(
+          post.mediaUrl ?? undefined,
+          post.contentType
+        );
+        if (!validation.isValid) {
+          logError("Instagram Story validation failed", {
+            error: validation.error,
+          });
+          return { success: false, error: validation.error || "Story validation failed" };
+        }
+        isVideoStory = validation.isVideo;
+        logInfo(`Instagram Story validated`, {
+          isVideo: isVideoStory,
+          mediaUrl: post.mediaUrl ? "(set)" : "(empty)",
+        });
+      }
+
       // Step 1: Create media container
       const containerResult = await this.client.createMediaContainer(
         caption,
         post.mediaUrl ?? undefined,
         instagramMediaType,
-        children.length > 0 ? children : undefined
+        children.length > 0 ? children : undefined,
+        isVideoStory
       );
 
       if (!containerResult.success || !containerResult.containerId) {
