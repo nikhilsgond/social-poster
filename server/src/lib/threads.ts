@@ -55,11 +55,17 @@ export class ThreadsGraphClient {
     params: Record<string, string>,
     method: string = "POST"
   ): Promise<any> {
+    // Build URL with access_token as query parameter (Meta Graph API standard)
     const allParams = { ...params, access_token: this.config.accessToken };
     const queryString = new URLSearchParams(allParams).toString();
     const url = `${BASE_URL}/${endpoint}?${queryString}`;
 
-    const response = await fetch(url, { method });
+    const response = await fetch(url, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
 
     if (!response.ok) {
       const errorBody = await response.text();
@@ -74,6 +80,8 @@ export class ThreadsGraphClient {
   }
 
   // ── Create media container ──
+  // Uses /me/threads endpoint per Meta Threads API docs.
+  // The access_token in the query identifies the user.
 
   async createMediaContainer(
     caption: string,
@@ -87,7 +95,7 @@ export class ThreadsGraphClient {
 
     try {
       const data = await this.request(
-        `${this.config.userId}/threads`,
+        `me/threads`,
         params
       );
       return {
@@ -104,13 +112,14 @@ export class ThreadsGraphClient {
   }
 
   // ── Publish container ──
+  // Uses /me/threads_publish endpoint per Meta Threads API docs.
 
   async publishContainer(
     creationId: string
   ): Promise<ThreadsPublishResult> {
     try {
       const data = await this.request(
-        `${this.config.userId}/threads_publish`,
+        `me/threads_publish`,
         { creation_id: creationId }
       );
       return {
@@ -132,7 +141,7 @@ export class ThreadsGraphClient {
   async verifyAccess(): Promise<boolean> {
     try {
       const data = await this.request(
-        this.config.userId,
+        `me`,
         { fields: "name,accounts" },
         "GET"
       );
