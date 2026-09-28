@@ -25,6 +25,8 @@ function validateConfig(): boolean {
     "SUPABASE_SERVICE_ROLE_KEY",
     "THREADS_USER_ID",
     "THREAD_ACCESS_TOKEN",
+    "IG_USER_ID",
+    "IG_ACCESS_TOKEN",
   ];
   const missing = required.filter((key) => !process.env[key]);
   if (missing.length > 0) {

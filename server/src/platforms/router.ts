@@ -20,7 +20,7 @@ function getFacebookPageToken(): string {
 }
 
 // Threads credentials from server environment (read dynamically at runtime)
-// Threads publishing uses the Instagram Graph API; these are the Instagram credentials
+// Threads uses its own API host (graph.threads.net)
 function getThreadsUserId(): string {
   return process.env.THREADS_USER_ID || "";
 }
