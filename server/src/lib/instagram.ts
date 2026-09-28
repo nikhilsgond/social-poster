@@ -1,17 +1,18 @@
 // server/src/lib/instagram.ts
 // Instagram Graph API client.
-// Uses the Meta Graph API host (graph.facebook.com) but with Instagram-specific
-// endpoints, parameters, and media types. Completely separate from Threads
-// (graph.threads.net) and Facebook Page API (graph.facebook.com/feed).
+// Uses the Instagram-specific API host graph.instagram.com (not graph.facebook.com).
+// This is the official host for Instagram Content Publishing API.
+// Completely separate from Threads (graph.threads.net) and Facebook Page API
+// (graph.facebook.com/feed).
 // Never logs access tokens or secrets.
 //
 // Official API reference: https://developers.facebook.com/docs/instagram-platform/
 // API version v26.0 is the current latest.
-// Authentication uses access_token as a query parameter for graph.facebook.com.
-// Media URLs must be publicly accessible — Meta cURLs the URL from the server.
+// Authentication uses Authorization: Bearer <token> header.
+// POST body is JSON. Media URLs must be publicly accessible.
 
 const GRAPH_API_VERSION = "v26.0";
-const BASE_URL = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
+const BASE_URL = `https://graph.instagram.com/${GRAPH_API_VERSION}`;
 
 export interface InstagramConfig {
   userId: string;
@@ -55,17 +56,48 @@ export class InstagramGraphClient {
   }
 
   // ── Internal request handler ──
+  // For graph.instagram.com:
+  // POST requests use JSON body + Authorization: Bearer <token> header
+  // GET requests use query params for fields
 
   private async request(
     endpoint: string,
     params: Record<string, string>,
     method: string = "POST"
   ): Promise<any> {
-    const allParams = { ...params, access_token: this.config.accessToken };
-    const queryString = new URLSearchParams(allParams).toString();
-    const url = `${BASE_URL}/${endpoint}?${queryString}`;
+    const url = `${BASE_URL}/${endpoint}`;
 
-    const response = await fetch(url, { method });
+    if (method === "GET") {
+      // GET: pass fields as query params, auth as Bearer header
+      const queryString = new URLSearchParams(params).toString();
+      const fullUrl = `${url}?${queryString}`;
+      const response = await fetch(fullUrl, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${this.config.accessToken}`,
+        },
+      });
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new InstagramApiError(
+          `Instagram API error ${response.status}: ${errorBody}`,
+          response.status,
+          errorBody
+        );
+      }
+      return response.json();
+    }
+
+    // POST: send JSON body with Authorization: Bearer header
+    const body = JSON.stringify(params);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${this.config.accessToken}`,
+      },
+      body,
+    });
 
     if (!response.ok) {
       const errorBody = await response.text();
@@ -80,15 +112,14 @@ export class InstagramGraphClient {
   }
 
   // ── Create media container ──
-  // Instagram API: POST /{userId}/media
+  // Instagram API: POST https://graph.instagram.com/v26.0/{userId}/media
   // Official reference: https://developers.facebook.com/docs/instagram-platform/
   //
   // For images: image_url, media_type=IMAGE
   // For videos: video_url, media_type=VIDEO
-  // For reels:  video_url, media_type=REELS, share_to_feed, cover_url
+  // For reels:  video_url, media_type=REELS, share_to_feed
   // For carousels: media_type=CAROUSEL, children (comma-separated child IDs)
-  // media_type is the correct parameter name (NOT content_type).
-  // image_url / video_url are the correct URL param names (NOT url).
+  // POST body is JSON with Authorization: Bearer <token> header.
   // Media URLs must be publicly accessible — Meta cURLs them.
 
   async createMediaContainer(
