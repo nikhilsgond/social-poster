@@ -8,3 +8,6 @@ dist/
 *.pem
 *.key
 .env.*.local
+.yt-oauth-tokens.json
+oauth-youtube-helper.mjs
+upload-youtube-test.mjs
