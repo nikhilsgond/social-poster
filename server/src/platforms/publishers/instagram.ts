@@ -1,13 +1,41 @@
 // server/src/platforms/publishers/instagram.ts
 // Real Instagram publisher.
-// Uses the Instagram Graph API to publish image and video posts.
+// Uses the Instagram Graph API client to publish image and video posts.
+// The Instagram client (src/lib/instagram.ts) is completely isolated from the
+// Threads client (src/lib/threads.ts) and Facebook client (src/lib/facebook.ts).
+// Separate host, endpoints, parameters, tokens, and error types.
 // Respects the existing scheduled_at scheduling semantics.
 // Never logs the access token.
 
 import type { Post } from "../../types";
 import type { PlatformPublisher, PublishResult } from "./interface";
 import { InstagramGraphClient } from "../../lib/instagram";
-import { logInfo, logError } from "../../lib/logger";
+import { logInfo, logWarn, logError } from "../../lib/logger";
+
+// ── Instagram media_type mapping ──
+// Social Planner uses internal content types (e.g. "Other", "Text", "Image").
+// Instagram API requires: IMAGE, VIDEO, CAROUSEL_ALBUM.
+// This mapping validates and converts the planner type to the Instagram API type.
+// Unknown types default to IMAGE since Instagram requires media.
+
+function mapToInstagramMediaType(contentType: string | undefined): string {
+  const upper = (contentType || "").toUpperCase();
+  switch (upper) {
+    case "IMAGE":
+    case "VIDEO":
+    case "CAROUSEL_ALBUM":
+    case "CAROUSEL":
+      return upper === "CAROUSEL" ? "CAROUSEL_ALBUM" : upper;
+    case "OTHER":
+    case "TEXT":
+    case "":
+      logWarn(`Instagram: unknown contentType "${contentType}" — defaulting to media_type=IMAGE`);
+      return "IMAGE";
+    default:
+      logWarn(`Instagram: unsupported contentType "${contentType}" — defaulting to media_type=IMAGE`);
+      return "IMAGE";
+  }
+}
 
 export class InstagramPublisher implements PlatformPublisher {
   private client: InstagramGraphClient;
@@ -34,15 +62,15 @@ export class InstagramPublisher implements PlatformPublisher {
     }
 
     try {
-      // Determine content type
-      const contentType = post.contentType || "IMAGE";
+      // Determine content type — map Social Planner contentType to Instagram API media_type
+      const instagramMediaType = mapToInstagramMediaType(post.contentType);
       const caption = post.caption || post.content || "";
 
       // Step 1: Create media container
       const containerResult = await this.client.createMediaContainer(
         caption,
         post.mediaUrl ?? undefined,
-        contentType
+        instagramMediaType
       );
 
       if (!containerResult.success || !containerResult.containerId) {

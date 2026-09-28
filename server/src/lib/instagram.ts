@@ -1,7 +1,8 @@
 // server/src/lib/instagram.ts
 // Instagram Graph API client.
-// Uses the Meta Graph API (same base as Facebook/Threads).
-// Implements media container creation and publishing.
+// Uses the Meta Graph API host (graph.facebook.com) but with Instagram-specific
+// endpoints, parameters, and media types. Completely separate from Threads
+// (graph.threads.net) and Facebook Page API (graph.facebook.com/feed).
 // Never logs access tokens or secrets.
 
 const GRAPH_API_VERSION = "v26.0";
@@ -74,20 +75,29 @@ export class InstagramGraphClient {
   }
 
   // ── Create media container ──
+  // Instagram API: POST /{userId}/media
+  // For images: image_url, media_type=IMAGE
+  // For videos: video_url, media_type=VIDEO
+  // media_type is the correct parameter name (NOT content_type).
+  // image_url / video_url are the correct URL param names (NOT url).
 
   async createMediaContainer(
     caption: string,
     mediaUrl?: string,
     contentType?: string
   ): Promise<InstagramContainerResult> {
-    const params: Record<string, string> = { caption };
+    const mediaType = (contentType || "IMAGE").toUpperCase();
+    const params: Record<string, string> = {
+      caption,
+      media_type: mediaType,
+    };
 
     if (mediaUrl) {
-      params.url = mediaUrl;
-    }
-
-    if (contentType) {
-      params.content_type = contentType;
+      if (mediaType === "VIDEO") {
+        params.video_url = mediaUrl;
+      } else {
+        params.image_url = mediaUrl;
+      }
     }
 
     try {
