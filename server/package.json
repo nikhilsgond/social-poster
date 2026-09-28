@@ -11,7 +11,9 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "latest",
-    "dotenv": "latest"
+    "cloudinary": "^2.11.0",
+    "dotenv": "latest",
+    "google-auth-library": "^11.1.0"
   },
   "devDependencies": {
     "@types/node": "latest",

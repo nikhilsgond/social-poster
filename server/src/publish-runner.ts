@@ -17,7 +17,7 @@ import type { Post } from "./types";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenvConfig.config({ path: path.join(__dirname, "..", ".env") });
 
-// ── Config validation for Threads + Instagram-only worker ──
+// ── Config validation for Threads + Instagram + YouTube worker ──
 
 function validateConfig(): boolean {
   const required = [
@@ -32,6 +32,16 @@ function validateConfig(): boolean {
   if (missing.length > 0) {
     logError(`Missing required environment variables: ${missing.join(", ")}`);
     return false;
+  }
+  // YouTube config (YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET are loaded
+  // directly in youtube.ts from process.env; YOUTUBE_REFRESH_TOKEN is validated
+  // in the router when creating the YouTubePublisher)
+  const hasYouTube =
+    process.env.YOUTUBE_CLIENT_ID &&
+    process.env.YOUTUBE_CLIENT_SECRET &&
+    process.env.YOUTUBE_REFRESH_TOKEN;
+  if (!hasYouTube) {
+    logWarn("YouTube credentials not fully configured — YouTube posts will be skipped");
   }
   logInfo("Publish runner configuration validated");
   return true;

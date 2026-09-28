@@ -2,13 +2,15 @@
 // Platform router: selects the correct publisher based on post.platform.
 // For Phase 6+: Facebook publisher is fully implemented.
 // Threads and Instagram are implemented for scheduled publishing.
-// YouTube, LinkedIn, X remain future integrations.
+// YouTube is implemented for video upload with publishAt scheduling.
+// LinkedIn, X remain future integrations.
 
 import type { Post } from "../types";
 import type { PlatformPublisher, PublishResult } from "./publishers/interface";
 import { getFacebookPublisher } from "./publishers/facebook";
 import { getThreadsPublisher } from "./publishers/threads";
 import { getInstagramPublisher } from "./publishers/instagram";
+import { getYouTubePublisher } from "./publishers/youtube";
 import { logWarn, logError } from "../lib/logger";
 
 // Facebook credentials from server environment (read dynamically at runtime)
@@ -86,7 +88,16 @@ function selectPublisher(platform: string): PlatformPublisher | null {
       }
       logWarn("Instagram credentials not configured in environment");
       return null;
-    case "yt":
+    case "yt": {
+      const youtubeUserId = process.env.YOUTUBE_USER_ID || "default";
+      const youtubeToken = process.env.YOUTUBE_ACCESS_TOKEN || "";
+      const youtubeRefreshToken = process.env.YOUTUBE_REFRESH_TOKEN || "";
+      if (youtubeToken && youtubeRefreshToken) {
+        return getYouTubePublisher(youtubeUserId, youtubeToken, youtubeRefreshToken);
+      }
+      logWarn("YouTube credentials not configured in environment");
+      return null;
+    }
     case "li":
     case "x":
       return null; // Future integrations
