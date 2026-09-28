@@ -11,6 +11,8 @@
 // Authentication uses Authorization: Bearer <token> header.
 // POST body is JSON. Media URLs must be publicly accessible.
 
+import { logInfo } from "./logger";
+
 const GRAPH_API_VERSION = "v26.0";
 const BASE_URL = `https://graph.instagram.com/${GRAPH_API_VERSION}`;
 
@@ -171,32 +173,65 @@ export class InstagramGraphClient {
   // ── Check container status ──
   // Instagram API: GET /{containerId}?fields=status_code
   // Before publishing, especially for video/Reels/Carousels,
-  // the container must be in a ready state.
-  // Status codes: PROCESSING, FINISHED, READY, ERROR
-  // Only publish when status is FINISHED or READY.
+  // the container must be in a ready state. Meta may need time to process.
+  // Status codes: IN_PROGRESS, PROCESSING, FINISHED, READY, ERROR
+  // Polls every 5 seconds, maximum 120 seconds total.
 
   async checkContainerStatus(
     containerId: string
   ): Promise<{ ready: boolean; status: string; error?: string }> {
-    try {
-      const data = await this.request(
-        `${containerId}`,
-        { fields: "status_code" },
-        "GET"
-      );
-      const status = data.status_code ?? "UNKNOWN";
-      const ready = status === "FINISHED" || status === "READY";
-      return {
-        ready,
-        status,
-        error: status === "ERROR" ? "Container processing failed" : undefined,
-      };
-    } catch (err: any) {
-      return {
-        ready: false,
-        status: "UNKNOWN",
-        error: err.message || "Failed to check container status",
-      };
+    const maxWaitMs = 120_000;
+    const pollIntervalMs = 5_000;
+    const startTime = Date.now();
+    let attempt = 0;
+
+    while (true) {
+      attempt++;
+      try {
+        const data = await this.request(
+          `${containerId}`,
+          { fields: "status_code" },
+          "GET"
+        );
+        const status = data.status_code ?? "UNKNOWN";
+
+        logInfo(`Instagram container status`, {
+          containerId,
+          status,
+          attempt,
+        });
+
+        if (status === "FINISHED" || status === "READY") {
+          return { ready: true, status };
+        }
+
+        if (status === "ERROR") {
+          return {
+            ready: false,
+            status,
+            error: "Container processing failed",
+          };
+        }
+
+        // IN_PROGRESS, PROCESSING, or other status — still processing
+        const elapsed = Date.now() - startTime;
+        if (elapsed >= maxWaitMs) {
+          return {
+            ready: false,
+            status,
+            error: `Container not ready after ${maxWaitMs / 1000}s timeout`,
+          };
+        }
+
+        // Wait 5 seconds before checking again
+        await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+      } catch (err: any) {
+        return {
+          ready: false,
+          status: "UNKNOWN",
+          error: err.message || "Failed to check container status",
+        };
+      }
     }
   }
 
