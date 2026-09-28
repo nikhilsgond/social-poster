@@ -1,11 +1,10 @@
 // server/src/lib/threads.ts
 // Threads API client.
-// Uses the Threads Graph API.
+// Uses the Threads API host (graph.threads.net).
 // Implements media container creation and publishing.
 // Never logs access tokens or secrets.
 
-const GRAPH_API_VERSION = "v19.0";
-const BASE_URL = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
+const BASE_URL = "https://graph.threads.net";
 
 export interface ThreadsConfig {
   userId: string;
@@ -55,7 +54,6 @@ export class ThreadsGraphClient {
     params: Record<string, string>,
     method: string = "POST"
   ): Promise<any> {
-    // Build URL with access_token as query parameter (Meta Graph API standard)
     const allParams = { ...params, access_token: this.config.accessToken };
     const queryString = new URLSearchParams(allParams).toString();
     const url = `${BASE_URL}/${endpoint}?${queryString}`;
@@ -80,8 +78,7 @@ export class ThreadsGraphClient {
   }
 
   // ── Create media container ──
-  // Uses /me/threads endpoint per Meta Threads API docs.
-  // The access_token in the query identifies the user.
+  // POST /{userId}/threads with media_type=TEXT and text=<content>.
 
   async createMediaContainer(
     caption: string,
@@ -95,7 +92,7 @@ export class ThreadsGraphClient {
 
     try {
       const data = await this.request(
-        `me/threads`,
+        `${this.config.userId}/threads`,
         params
       );
       return {
@@ -112,14 +109,14 @@ export class ThreadsGraphClient {
   }
 
   // ── Publish container ──
-  // Uses /me/threads_publish endpoint per Meta Threads API docs.
+  // POST /{userId}/threads_publish with creation_id=<containerId>.
 
   async publishContainer(
     creationId: string
   ): Promise<ThreadsPublishResult> {
     try {
       const data = await this.request(
-        `me/threads_publish`,
+        `${this.config.userId}/threads_publish`,
         { creation_id: creationId }
       );
       return {
@@ -141,7 +138,7 @@ export class ThreadsGraphClient {
   async verifyAccess(): Promise<boolean> {
     try {
       const data = await this.request(
-        `me`,
+        `${this.config.userId}`,
         { fields: "name,accounts" },
         "GET"
       );
