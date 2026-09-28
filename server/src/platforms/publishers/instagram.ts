@@ -1,11 +1,15 @@
 // server/src/platforms/publishers/instagram.ts
 // Real Instagram publisher.
-// Uses the Instagram Graph API client to publish image and video posts.
+// Uses the Instagram Graph API client to publish image, video, reel,
+// and carousel posts.
 // The Instagram client (src/lib/instagram.ts) is completely isolated from the
 // Threads client (src/lib/threads.ts) and Facebook client (src/lib/facebook.ts).
 // Separate host, endpoints, parameters, tokens, and error types.
 // Respects the existing scheduled_at scheduling semantics.
 // Never logs the access token.
+//
+// Media URLs must be publicly accessible — Meta cURLs the URL from the server.
+// Private URLs (Google Drive, localhost, etc.) will fail.
 
 import type { Post } from "../../types";
 import type { PlatformPublisher, PublishResult } from "./interface";
@@ -13,27 +17,28 @@ import { InstagramGraphClient } from "../../lib/instagram";
 import { logInfo, logWarn, logError } from "../../lib/logger";
 
 // ── Instagram media_type mapping ──
-// Social Planner uses internal content types (e.g. "Other", "Text", "Image").
-// Instagram API requires: IMAGE, VIDEO, CAROUSEL_ALBUM.
+// Social Planner uses internal content types (e.g. "Image", "Video", "Carousel").
+// Instagram API requires: IMAGE, VIDEO, REELS, CAROUSEL_ALBUM.
 // This mapping validates and converts the planner type to the Instagram API type.
-// Unknown types default to IMAGE since Instagram requires media.
+// Unsupported values throw a local error before calling the API.
 
 function mapToInstagramMediaType(contentType: string | undefined): string {
   const upper = (contentType || "").toUpperCase();
   switch (upper) {
     case "IMAGE":
+      return "IMAGE";
     case "VIDEO":
+      return "VIDEO";
+    case "REELS":
+    case "REEL":
+      return "REELS";
     case "CAROUSEL_ALBUM":
     case "CAROUSEL":
-      return upper === "CAROUSEL" ? "CAROUSEL_ALBUM" : upper;
-    case "OTHER":
-    case "TEXT":
-    case "":
-      logWarn(`Instagram: unknown contentType "${contentType}" — defaulting to media_type=IMAGE`);
-      return "IMAGE";
+      return "CAROUSEL_ALBUM";
     default:
-      logWarn(`Instagram: unsupported contentType "${contentType}" — defaulting to media_type=IMAGE`);
-      return "IMAGE";
+      throw new Error(
+        `Unsupported Instagram content type: ${contentType || "(empty)"}`
+      );
   }
 }
 
@@ -66,11 +71,15 @@ export class InstagramPublisher implements PlatformPublisher {
       const instagramMediaType = mapToInstagramMediaType(post.contentType);
       const caption = post.caption || post.content || "";
 
+      // For carousels, extract child container IDs from the post data if available
+      const children = post.carouselChildren ?? [];
+
       // Step 1: Create media container
       const containerResult = await this.client.createMediaContainer(
         caption,
         post.mediaUrl ?? undefined,
-        instagramMediaType
+        instagramMediaType,
+        children.length > 0 ? children : undefined
       );
 
       if (!containerResult.success || !containerResult.containerId) {
@@ -80,7 +89,8 @@ export class InstagramPublisher implements PlatformPublisher {
 
       logInfo(`Instagram container created`, { containerId: containerResult.containerId });
 
-      // Step 2: Publish the container
+      // Step 2: Check container status (important for video/Reels/Carousels)
+      // and then publish the container
       const publishResult = await this.client.publishContainer(containerResult.containerId);
 
       if (publishResult.success) {

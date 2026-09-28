@@ -36,4 +36,5 @@ export interface Post {
   permalink?: string | null;
   createdAt?: string;
   updatedAt?: string;
+  carouselChildren?: string[];
 }

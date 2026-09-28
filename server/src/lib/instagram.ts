@@ -4,6 +4,11 @@
 // endpoints, parameters, and media types. Completely separate from Threads
 // (graph.threads.net) and Facebook Page API (graph.facebook.com/feed).
 // Never logs access tokens or secrets.
+//
+// Official API reference: https://developers.facebook.com/docs/instagram-platform/
+// API version v26.0 is the current latest.
+// Authentication uses access_token as a query parameter for graph.facebook.com.
+// Media URLs must be publicly accessible — Meta cURLs the URL from the server.
 
 const GRAPH_API_VERSION = "v26.0";
 const BASE_URL = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
@@ -76,15 +81,21 @@ export class InstagramGraphClient {
 
   // ── Create media container ──
   // Instagram API: POST /{userId}/media
+  // Official reference: https://developers.facebook.com/docs/instagram-platform/
+  //
   // For images: image_url, media_type=IMAGE
   // For videos: video_url, media_type=VIDEO
+  // For reels:  video_url, media_type=REELS, share_to_feed, cover_url
+  // For carousels: media_type=CAROUSEL, children (comma-separated child IDs)
   // media_type is the correct parameter name (NOT content_type).
   // image_url / video_url are the correct URL param names (NOT url).
+  // Media URLs must be publicly accessible — Meta cURLs them.
 
   async createMediaContainer(
     caption: string,
     mediaUrl?: string,
-    contentType?: string
+    contentType?: string,
+    children?: string[]
   ): Promise<InstagramContainerResult> {
     const mediaType = (contentType || "IMAGE").toUpperCase();
     const params: Record<string, string> = {
@@ -92,9 +103,17 @@ export class InstagramGraphClient {
       media_type: mediaType,
     };
 
-    if (mediaUrl) {
-      if (mediaType === "VIDEO") {
+    // Carousel: use children parameter with comma-separated child container IDs
+    if (mediaType === "CAROUSEL_ALBUM" && children && children.length > 0) {
+      params.children = children.join(",");
+    } else if (mediaUrl) {
+      // IMAGE, VIDEO, and REELS all use video_url for video/reel content
+      if (mediaType === "VIDEO" || mediaType === "REELS") {
         params.video_url = mediaUrl;
+        // Reels-specific optional parameters
+        if (mediaType === "REELS") {
+          params.share_to_feed = "false";
+        }
       } else {
         params.image_url = mediaUrl;
       }
@@ -118,11 +137,57 @@ export class InstagramGraphClient {
     }
   }
 
+  // ── Check container status ──
+  // Instagram API: GET /{containerId}?fields=status_code
+  // Before publishing, especially for video/Reels/Carousels,
+  // the container must be in a ready state.
+  // Status codes: PROCESSING, FINISHED, READY, ERROR
+  // Only publish when status is FINISHED or READY.
+
+  async checkContainerStatus(
+    containerId: string
+  ): Promise<{ ready: boolean; status: string; error?: string }> {
+    try {
+      const data = await this.request(
+        `${containerId}`,
+        { fields: "status_code" },
+        "GET"
+      );
+      const status = data.status_code ?? "UNKNOWN";
+      const ready = status === "FINISHED" || status === "READY";
+      return {
+        ready,
+        status,
+        error: status === "ERROR" ? "Container processing failed" : undefined,
+      };
+    } catch (err: any) {
+      return {
+        ready: false,
+        status: "UNKNOWN",
+        error: err.message || "Failed to check container status",
+      };
+    }
+  }
+
   // ── Publish container ──
+  // Instagram API: POST /{userId}/media_publish
+  // creation_id=<containerId>
+  // Before publishing, check container status to ensure it's ready.
+  // Especially important for video/Reels/Carousels which need processing time.
+  // Status codes: PROCESSING, FINISHED, READY, ERROR
 
   async publishContainer(
     creationId: string
   ): Promise<InstagramPublishResult> {
+    // Check container status before publishing
+    const status = await this.checkContainerStatus(creationId);
+    if (!status.ready) {
+      return {
+        success: false,
+        error: `Container not ready for publishing. Status: ${status.status}${status.error ? ` — ${status.error}` : ""}`,
+      };
+    }
+
     try {
       const data = await this.request(
         `${this.config.userId}/media_publish`,
