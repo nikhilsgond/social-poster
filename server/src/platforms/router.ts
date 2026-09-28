@@ -22,10 +22,10 @@ function getFacebookPageToken(): string {
 // Threads credentials from server environment (read dynamically at runtime)
 // Threads publishing uses the Instagram Graph API; these are the Instagram credentials
 function getThreadsUserId(): string {
-  return process.env.IG_USER_ID || "";
+  return process.env.THREADS_USER_ID || "";
 }
 function getThreadsAccessToken(): string {
-  return process.env.IG_ACCESS_TOKEN || "";
+  return process.env.THREAD_ACCESS_TOKEN || "";
 }
 
 // Instagram credentials from server environment (read dynamically at runtime)
