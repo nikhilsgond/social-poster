@@ -1,13 +1,38 @@
 // server/src/platforms/publishers/threads.ts
 // Real Threads publisher.
 // Uses the Threads Graph API client to publish text, image, and video posts.
+// The Threads client (src/lib/threads.ts) is completely isolated from the
+// Facebook and Instagram clients — separate host, endpoints, tokens, and errors.
 // Respects the existing scheduled_at scheduling semantics.
 // Never logs the access token.
 
 import type { Post } from "../../types";
 import type { PlatformPublisher, PublishResult } from "./interface";
 import { ThreadsGraphClient } from "../../lib/threads";
-import { logInfo, logError } from "../../lib/logger";
+import { logInfo, logWarn, logError } from "../../lib/logger";
+
+// ── Threads media_type mapping ──
+// Social Planner uses internal content types (e.g. "Other", "Text", "Image").
+// Threads API requires: TEXT, IMAGE, VIDEO.
+// This mapping validates and converts the planner type to the Threads API type.
+// Unknown types like "Other" default to TEXT for text-only Threads publishing.
+
+function mapToThreadsMediaType(contentType: string | undefined): string {
+  const upper = (contentType || "").toUpperCase();
+  switch (upper) {
+    case "TEXT":
+    case "IMAGE":
+    case "VIDEO":
+      return upper;
+    case "OTHER":
+    case "":
+      logWarn(`Threads: unknown contentType "${contentType}" — defaulting to media_type=TEXT`);
+      return "TEXT";
+    default:
+      logWarn(`Threads: unsupported contentType "${contentType}" — defaulting to media_type=TEXT`);
+      return "TEXT";
+  }
+}
 
 export class ThreadsPublisher implements PlatformPublisher {
   private client: ThreadsGraphClient;
@@ -34,15 +59,15 @@ export class ThreadsPublisher implements PlatformPublisher {
     }
 
     try {
-      // Determine content type
-      const contentType = post.contentType || "TEXT";
+      // Determine content type — map Social Planner contentType to Threads API media_type
+      const threadsMediaType = mapToThreadsMediaType(post.contentType);
       const caption = post.caption || post.content || "";
 
       // Step 1: Create media container
       const containerResult = await this.client.createMediaContainer(
         caption,
         post.mediaUrl ?? undefined,
-        contentType
+        threadsMediaType
       );
 
       if (!containerResult.success || !containerResult.containerId) {
