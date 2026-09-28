@@ -17,10 +17,15 @@ import type { Post } from "./types";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenvConfig.config({ path: path.join(__dirname, "..", ".env") });
 
-// ── Config validation (mirrors server/src/index.ts validateConfig) ──
+// ── Config validation for Threads + Instagram-only worker ──
 
 function validateConfig(): boolean {
-  const required = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "META_PAGE_ID", "META_PAGE_ACCESS_TOKEN"];
+  const required = [
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "IG_USER_ID",
+    "IG_ACCESS_TOKEN",
+  ];
   const missing = required.filter((key) => !process.env[key]);
   if (missing.length > 0) {
     logError(`Missing required environment variables: ${missing.join(", ")}`);
@@ -65,14 +70,25 @@ async function main(): Promise<void> {
 
   const duePosts = await getDuePosts();
 
-  if (duePosts.length === 0) {
-    logInfo("No due posts found.");
+  // Filter to Threads + Instagram only for this phase
+  // Facebook posts are ignored during this phase
+  const publishablePosts = duePosts.filter(
+    (post) => post.platform === "th" || post.platform === "ig"
+  );
+
+  const skippedFacebook = duePosts.filter((post) => post.platform === "fb").length;
+  if (skippedFacebook > 0) {
+    logInfo(`Skipped ${skippedFacebook} Facebook post(s) — not processing in this phase`);
+  }
+
+  if (publishablePosts.length === 0) {
+    logInfo("No due Threads or Instagram posts found.");
     process.exit(0);
   }
 
-  logInfo(`Found ${duePosts.length} due post(s)`);
+  logInfo(`Found ${publishablePosts.length} due post(s) to process`);
 
-  for (const post of duePosts) {
+  for (const post of publishablePosts) {
     try {
       await publishPost(post);
     } catch (err: any) {

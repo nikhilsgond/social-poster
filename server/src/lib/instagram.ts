@@ -1,50 +1,50 @@
-// server/src/lib/threads.ts
-// Threads API client.
-// Uses the Threads Graph API.
+// server/src/lib/instagram.ts
+// Instagram Graph API client.
+// Uses the Meta Graph API (same base as Facebook/Threads).
 // Implements media container creation and publishing.
 // Never logs access tokens or secrets.
 
 const GRAPH_API_VERSION = "v19.0";
 const BASE_URL = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
 
-export interface ThreadsConfig {
+export interface InstagramConfig {
   userId: string;
   accessToken: string;
 }
 
-export interface ThreadsContainerResult {
+export interface InstagramContainerResult {
   success: boolean;
   containerId?: string | null;
   error?: string | null;
 }
 
-export interface ThreadsPublishResult {
+export interface InstagramPublishResult {
   success: boolean;
   postId?: string | null;
   permalink?: string | null;
   error?: string | null;
 }
 
-// ── Threads API Error ──
+// ── Instagram API Error ──
 
-export class ThreadsApiError extends Error {
+export class InstagramApiError extends Error {
   public statusCode: number;
   public body: string;
 
   constructor(message: string, statusCode: number, body: string) {
     super(message);
-    this.name = "ThreadsApiError";
+    this.name = "InstagramApiError";
     this.statusCode = statusCode;
     this.body = body;
   }
 }
 
-// ── Threads Graph API Client ──
+// ── Instagram Graph API Client ──
 
-export class ThreadsGraphClient {
-  private config: ThreadsConfig;
+export class InstagramGraphClient {
+  private config: InstagramConfig;
 
-  constructor(config: ThreadsConfig) {
+  constructor(config: InstagramConfig) {
     this.config = config;
   }
 
@@ -63,8 +63,8 @@ export class ThreadsGraphClient {
 
     if (!response.ok) {
       const errorBody = await response.text();
-      throw new ThreadsApiError(
-        `Threads API error ${response.status}: ${errorBody}`,
+      throw new InstagramApiError(
+        `Instagram API error ${response.status}: ${errorBody}`,
         response.status,
         errorBody
       );
@@ -79,15 +79,20 @@ export class ThreadsGraphClient {
     caption: string,
     mediaUrl?: string,
     contentType?: string
-  ): Promise<ThreadsContainerResult> {
-    const params: Record<string, string> = {
-      media_type: contentType || "TEXT",
-      text: caption,
-    };
+  ): Promise<InstagramContainerResult> {
+    const params: Record<string, string> = { caption };
+
+    if (mediaUrl) {
+      params.url = mediaUrl;
+    }
+
+    if (contentType) {
+      params.content_type = contentType;
+    }
 
     try {
       const data = await this.request(
-        `${this.config.userId}/threads`,
+        `${this.config.userId}/media`,
         params
       );
       return {
@@ -98,7 +103,7 @@ export class ThreadsGraphClient {
     } catch (err: any) {
       return {
         success: false,
-        error: err.message || "Threads container creation failed",
+        error: err.message || "Instagram container creation failed",
       };
     }
   }
@@ -107,10 +112,10 @@ export class ThreadsGraphClient {
 
   async publishContainer(
     creationId: string
-  ): Promise<ThreadsPublishResult> {
+  ): Promise<InstagramPublishResult> {
     try {
       const data = await this.request(
-        `${this.config.userId}/threads_publish`,
+        `${this.config.userId}/media_publish`,
         { creation_id: creationId }
       );
       return {
@@ -122,7 +127,7 @@ export class ThreadsGraphClient {
     } catch (err: any) {
       return {
         success: false,
-        error: err.message || "Threads publish failed",
+        error: err.message || "Instagram publish failed",
       };
     }
   }
@@ -138,7 +143,7 @@ export class ThreadsGraphClient {
       );
       return !!data.name;
     } catch (err: any) {
-      throw new Error(`Threads verification failed: ${err.message}`);
+      throw new Error(`Instagram verification failed: ${err.message}`);
     }
   }
 }

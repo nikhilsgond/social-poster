@@ -1,12 +1,14 @@
 // server/src/platforms/router.ts
 // Platform router: selects the correct publisher based on post.platform.
 // For Phase 6+: Facebook publisher is fully implemented.
-// YouTube, Threads, Instagram remain future integrations.
+// Threads and Instagram are implemented for scheduled publishing.
+// YouTube, LinkedIn, X remain future integrations.
 
 import type { Post } from "../types";
 import type { PlatformPublisher, PublishResult } from "./publishers/interface";
 import { getFacebookPublisher } from "./publishers/facebook";
 import { getThreadsPublisher } from "./publishers/threads";
+import { getInstagramPublisher } from "./publishers/instagram";
 import { logWarn, logError } from "../lib/logger";
 
 // Facebook credentials from server environment (read dynamically at runtime)
@@ -18,11 +20,20 @@ function getFacebookPageToken(): string {
 }
 
 // Threads credentials from server environment (read dynamically at runtime)
+// Threads publishing uses the Instagram Graph API; these are the Instagram credentials
 function getThreadsUserId(): string {
-  return process.env.THREADS_USER_ID || "";
+  return process.env.IG_USER_ID || "";
 }
 function getThreadsAccessToken(): string {
-  return process.env.THREAD_ACCESS_TOKEN || "";
+  return process.env.IG_ACCESS_TOKEN || "";
+}
+
+// Instagram credentials from server environment (read dynamically at runtime)
+function getInstagramUserId(): string {
+  return process.env.IG_USER_ID || "";
+}
+function getInstagramAccessToken(): string {
+  return process.env.IG_ACCESS_TOKEN || "";
 }
 
 export async function routePublisher(post: Post): Promise<PublishResult> {
@@ -67,8 +78,15 @@ function selectPublisher(platform: string): PlatformPublisher | null {
       }
       logWarn("Threads credentials not configured in environment");
       return null;
-    case "yt":
     case "ig":
+      const igUserId = getInstagramUserId();
+      const igToken = getInstagramAccessToken();
+      if (igUserId && igToken) {
+        return getInstagramPublisher(igUserId, igToken);
+      }
+      logWarn("Instagram credentials not configured in environment");
+      return null;
+    case "yt":
     case "li":
     case "x":
       return null; // Future integrations
