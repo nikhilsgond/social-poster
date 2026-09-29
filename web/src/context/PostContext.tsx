@@ -31,6 +31,7 @@ export type PostAction =
   | { type: "SET_ERROR"; payload: string | null }
   | { type: "SELECT_TOGGLE"; payload: string }
   | { type: "SET_SELECTED"; payload: Record<string, boolean> }
+  | { type: "SET_EDIT_POST"; payload: string | null }
   | { type: "PUSH_SNAPSHOT" }
   | { type: "UNDO" }
   | { type: "REDO" };
@@ -61,6 +62,7 @@ interface PostContextType {
   clearPosts: () => void;
   toggleSelect: (id: string) => void;
   setSelectedPosts: (posts: Record<string, boolean>) => void;
+  setEditPost: (id: string | null) => void;
   undo: () => void;
   redo: () => void;
   canUndo: boolean;
@@ -124,6 +126,9 @@ function postReducer(state: PostState, action: PostAction): PostState {
 
     case "SET_SELECTED":
       return { ...state, selectedPosts: action.payload };
+
+    case "SET_EDIT_POST":
+      return { ...state, editPostId: action.payload };
 
     case "PUSH_SNAPSHOT": {
       const trimmed = state.history.slice(0, state.historyIndex + 1);
@@ -253,6 +258,10 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
     // Actually, selectedPosts should be managed through the reducer
   }, []);
 
+  const setEditPost = useCallback((id: string | null) => {
+    dispatch({ type: "SET_EDIT_POST", payload: id });
+  }, [dispatch]);
+
   const undo = useCallback(() => dispatch({ type: "UNDO" }), []);
   const redo = useCallback(() => dispatch({ type: "REDO" }), []);
   const canUndo = state.historyIndex > 0;
@@ -266,6 +275,7 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
       clearPosts: () => dispatch({ type: "CLEAR_POSTS" }),
       toggleSelect: () => {},
       setSelectedPosts: () => {},
+      setEditPost,
       undo, redo, canUndo, canRedo,
     }}>
       {children}

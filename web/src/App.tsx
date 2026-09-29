@@ -25,6 +25,7 @@ const DEFAULT_MONTH = { year: new Date().getFullYear(), month: new Date().getMon
 function loadUrlState(): Partial<{
   view: View; year: number; month: number; tableTab: string; tableSearch: string;
   tableContentType: string; tableStatus: string; tableSort: string; tableSortDir: string;
+  tablePage: number;
   metricsTab: string; analysisMetric: string; analysisDimension: string; editPostId: string;
 }> {
   try {
@@ -39,6 +40,7 @@ function loadUrlState(): Partial<{
       tableStatus: params.get("status") || "all",
       tableSort: params.get("sort") || "date",
       tableSortDir: params.get("dir") || "asc",
+      tablePage: Number(params.get("page")) || 1,
       metricsTab: params.get("metrics") || "all",
       analysisMetric: params.get("metric") || "views",
       analysisDimension: params.get("dimension") || "contentType",
@@ -58,6 +60,7 @@ function syncUrlState(state: Record<string, string | number | boolean | undefine
   params.set("view", view);
   if (state.year) params.set("year", String(state.year));
   if (state.month !== undefined) params.set("month", String(state.month));
+  if (state.tablePage) params.set("page", String(state.tablePage));
   const search = params.toString();
   const newUrl = search ? `${window.location.pathname}?${search}` : window.location.pathname;
   window.history.replaceState(null, "", newUrl);
@@ -66,7 +69,7 @@ function syncUrlState(state: Record<string, string | number | boolean | undefine
 // ── Main App Content ──
 function AppContent() {
   const { showToast } = useToast();
-  const { state, dispatch, addPost, updatePost, deletePost, bulkAddPosts, movePost, undo, redo, canUndo, canRedo } = usePostContext();
+  const { state, dispatch, addPost, updatePost, deletePost, bulkAddPosts, movePost, undo, redo, canUndo, canRedo, setEditPost } = usePostContext();
   const { posts, selectedPosts, editPostId, loading, error } = state;
 
   // ── View state ──
@@ -90,6 +93,13 @@ function AppContent() {
   const [metricsTab, setMetricsTab] = useState<Platform | "all">(() => (loadUrlState().metricsTab as Platform | "all") || "all");
   const [analysisMetric, setAnalysisMetric] = useState(() => loadUrlState().analysisMetric || "views");
   const [analysisDimension, setAnalysisDimension] = useState(() => loadUrlState().analysisDimension || "contentType");
+
+  // ── Table pagination state ──
+  const [tablePageSize] = useState(15);
+  const [tablePage, setTablePage] = useState(() => {
+    const url = loadUrlState();
+    return Number(url.tablePage) || 1;
+  });
 
   // ── Selection state ──
   const [selectionMode, setSelectionMode] = useState(false);
@@ -125,10 +135,10 @@ function AppContent() {
   const syncUrl = useCallback(() => {
     syncUrlState({
       view, year: currentMonth.year, month: currentMonth.month,
-      tableTab, tableSearch, tableContentType, tableStatus, tableSort, tableSortDir,
+      tableTab, tableSearch, tableContentType, tableStatus, tableSort, tableSortDir, tablePage,
       metricsTab, analysisMetric, analysisDimension, selectionMode: selectionMode || undefined,
     });
-  }, [view, currentMonth, tableTab, tableSearch, tableContentType, tableStatus, tableSort, tableSortDir, metricsTab, analysisMetric, analysisDimension, selectionMode]);
+  }, [view, currentMonth, tableTab, tableSearch, tableContentType, tableStatus, tableSort, tableSortDir, tablePage, metricsTab, analysisMetric, analysisDimension, selectionMode]);
 
   useEffect(() => { syncUrl(); }, [syncUrl]);
 
@@ -143,6 +153,7 @@ function AppContent() {
     if (urlState.tableStatus) setTableStatus(urlState.tableStatus);
     if (urlState.tableSort) setTableSort(urlState.tableSort);
     if (urlState.tableSortDir) setTableSortDir(urlState.tableSortDir);
+    if (urlState.tablePage) setTablePage(urlState.tablePage);
     if (urlState.metricsTab) setMetricsTab(urlState.metricsTab as Platform | "all");
     if (urlState.analysisMetric) setAnalysisMetric(urlState.analysisMetric);
     if (urlState.analysisDimension) setAnalysisDimension(urlState.analysisDimension);
@@ -165,6 +176,7 @@ function AppContent() {
   const openAddModal = useCallback((preset?: { date?: string; platform?: Platform }) => {
     setModalOpen(true);
     setModalPreset(preset || null);
+    setEditPost(null);
     setModalPlatform(preset?.platform || "yt");
     setModalDate(preset?.date || new Date().toISOString().slice(0, 10));
     setModalTime("");
@@ -182,6 +194,7 @@ function AppContent() {
   const openEditModal = useCallback((post: Post) => {
     setModalOpen(true);
     setModalPreset(null);
+    setEditPost(post.id);
     setModalPlatform(post.platform);
     setModalDate(post.date);
     setModalTime(post.time);
@@ -203,6 +216,7 @@ function AppContent() {
     setBulkImportResult(null);
     setBulkErrors([]);
     setSelectionMode(false);
+    setEditPost(null);
   }, []);
 
   // ── Save Post (Add or Edit) ──
@@ -276,6 +290,7 @@ function AppContent() {
   const clearFilters = useCallback(() => {
     setTableSearch(""); setTableContentType("all"); setTableStatus("all");
     setTableSort("date"); setTableSortDir("asc");
+    setTablePage(1);
   }, []);
 
   // ── Month Navigation ──
@@ -299,6 +314,11 @@ function AppContent() {
   const jumpToTable = useCallback((postId: string, platform: Platform) => {
     setView("tables"); setTableTab(platform);
   }, []);
+
+  // ── View Post from Calendar (opens edit modal) ──
+  const onViewPost = useCallback((post: Post) => {
+    openEditModal(post);
+  }, [openEditModal]);
 
   // ── Drop on Calendar (drag) ──
   const handleDrop = useCallback(async (newDate: string) => {
@@ -481,6 +501,7 @@ function AppContent() {
                 onAddPost={openAddModal}
                 onView={(v) => switchView(v)}
                 onJumpToTable={jumpToTable}
+                onViewPost={onViewPost}
                 posts={posts}
                 selectedPosts={selectedPosts}
                 onToggleSelect={toggleSelect}
@@ -496,16 +517,16 @@ function AppContent() {
           {view === "tables" && !loading && (
             <Tables
               currentTab={tableTab}
-              onTabChange={(tab: string) => setTableTab(tab as any)}
+              onTabChange={(tab: string) => { setTableTab(tab as any); setTablePage(1); }}
               posts={posts}
               tableSearch={tableSearch}
-              onSearchChange={setTableSearch}
+              onSearchChange={(val) => { setTableSearch(val); setTablePage(1); }}
               tableContentType={tableContentType}
-              onContentTypeChange={setTableContentType}
+              onContentTypeChange={(val) => { setTableContentType(val); setTablePage(1); }}
               tableStatus={tableStatus}
-              onStatusChange={setTableStatus}
+              onStatusChange={(val) => { setTableStatus(val); setTablePage(1); }}
               tableSort={tableSort}
-              onSortChange={setTableSort}
+              onSortChange={(val) => { setTableSort(val); setTablePage(1); }}
               tableSortDir={tableSortDir}
               onSortDirChange={() => setTableSortDir((d) => (d === "asc" ? "desc" : "asc"))}
               selectionMode={selectionMode}
@@ -516,10 +537,14 @@ function AppContent() {
               onExportCSV={exportCSV}
               onPrint={printTable}
               onEditPost={openEditModal}
+              onViewPost={onViewPost}
               onDeletePost={deletePostFn}
               onClearFilters={clearFilters}
               selectedPosts={selectedPosts}
               onToggleSelect={toggleSelect}
+              pageSize={tablePageSize}
+              currentPage={tablePage}
+              onPageChange={setTablePage}
             />
           )}
 

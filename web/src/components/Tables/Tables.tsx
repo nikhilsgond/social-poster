@@ -3,6 +3,7 @@ import React, { useMemo } from "react";
 import { PlatformIcon, platformDataMap, Platform } from "../common/PlatformIcon";
 import { useToast } from "../common/Toast";
 import type { Post } from "../../types/post";
+import { getStatusLabel, getStatusClass, STATUS_OPTIONS } from "../../types/post";
 import { FIELD_SCHEMA, METRIC_FIELDS } from "../../lib/contentTypes";
 
 const PLATFORMS: Platform[] = ["yt", "ig", "fb", "th", "li", "x"];
@@ -28,11 +29,15 @@ interface TablesProps {
   onExportCSV: () => void;
   onPrint: () => void;
   onEditPost: (post: Post) => void;
+  onViewPost: (post: Post) => void;
   onDeletePost: (id: string) => void;
   onClearFilters: () => void;
   selectedPosts: Record<string, boolean>;
   onToggleSelect: (id: string) => void;
   posts: Post[];
+  pageSize: number;
+  currentPage: number;
+  onPageChange: (page: number) => void;
 }
 
 function escapeHtml(str: string): string {
@@ -44,17 +49,6 @@ function escapeHtml(str: string): string {
 function truncate(str: string, n: number): string {
   if (!str) return "";
   return str.length > n ? str.slice(0, n - 1) + "\u2026" : str;
-}
-
-function getStatus(dateStr: string): string {
-  const today = new Date().toISOString().slice(0, 10);
-  return dateStr < today ? "posted" : "scheduled";
-}
-
-function prettyDateShort(dateStr: string): string {
-  const parts = dateStr.split("-");
-  const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 function relativeTime(ts: string | null | undefined): string {
@@ -73,16 +67,28 @@ function metricNumber(post: Post | null, key: string): number {
   return Number.isFinite(v) ? v : 0;
 }
 
-function formatMetric(n: number): string {
-  n = Number(n) || 0;
-  const abs = Math.abs(n);
-  if (abs >= 1000000) return (n / 1000000).toFixed(abs >= 10000000 ? 0 : 1) + "M";
-  if (abs >= 1000) return (n / 1000).toFixed(abs >= 100000 ? 0 : 1) + "K";
-  return Math.round(n).toLocaleString();
+function prettyDateShort(dateStr: string): string {
+  if (!dateStr) return "\u2014";
+  const parts = dateStr.split("-");
+  const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function schemaFor(key: Platform) {
-  return FIELD_SCHEMA[key] || FIELD_SCHEMA.x;
+function getPreview(post: Post): string {
+  switch (post.platform) {
+    case "yt": return post.title || "";
+    case "ig": return post.caption || post.topic || "";
+    case "fb": return post.content || post.topic || "";
+    default: return post.content || post.topic || "";
+  }
+}
+
+function formatPublishedAt(publishedAt: string | null | undefined): string {
+  if (!publishedAt) return "\u2014";
+  const parts = publishedAt.split("T");
+  const datePart = prettyDateShort(parts[0]);
+  const timePart = parts[1] ? parts[1].slice(0, 5) : "";
+  return timePart ? `${datePart} \u00b7 ${timePart}` : datePart;
 }
 
 export const Tables: React.FC<TablesProps> = ({
@@ -90,11 +96,13 @@ export const Tables: React.FC<TablesProps> = ({
   tableContentType, onContentTypeChange, tableStatus, onStatusChange,
   tableSort, onSortChange, tableSortDir, onSortDirChange,
   selectionMode, onEnterDeleteMode, onExitDeleteMode, onDeleteSelected,
-  onExportJSON, onExportCSV, onPrint, onEditPost, onDeletePost, onClearFilters,
-  selectedPosts, onToggleSelect, posts,
+  onExportJSON, onExportCSV, onPrint, onEditPost, onViewPost, onDeletePost, onClearFilters,
+  selectedPosts, onToggleSelect, posts, pageSize, currentPage, onPageChange,
 }) => {
   const { showToast } = useToast();
+  const isAllView = currentTab === "all";
 
+  // ── Filter & Sort ──
   const filteredPosts = useMemo(() => {
     const search = tableSearch.trim().toLowerCase();
     const platformFilter = currentTab;
@@ -103,9 +111,9 @@ export const Tables: React.FC<TablesProps> = ({
     return posts.filter((p) => {
       if (platformFilter !== "all" && p.platform !== platformFilter) return false;
       if (typeFilter !== "all" && String(p.contentType || "") !== typeFilter) return false;
-      if (statusFilter !== "all" && getStatus(p.date) !== statusFilter) return false;
+      if (statusFilter !== "all" && p.status !== statusFilter) return false;
       if (search) {
-        const schema = schemaFor(p.platform);
+        const schema = FIELD_SCHEMA[p.platform] || FIELD_SCHEMA.x;
         const fields = schema.map((f) => (p as any)[f.key] || "").join(" ");
         const hay = (p.platform + " " + (p.contentType || "") + " " + fields + " " + (p.title || p.topic || p.content || "")).toLowerCase();
         if (hay.indexOf(search) === -1) return false;
@@ -116,13 +124,25 @@ export const Tables: React.FC<TablesProps> = ({
       if (tableSort === "views" || tableSort === "likes" || tableSort === "comments") return (metricNumber(a, tableSort) - metricNumber(b, tableSort)) * dir;
       if (tableSort === "platform") return platformDataMap[a.platform].name.localeCompare(platformDataMap[b.platform].name) * dir;
       if (tableSort === "contentType") return (a.contentType || "").localeCompare(b.contentType || "") * dir;
+      if (tableSort === "status") return (a.status || "").localeCompare(b.status || "") * dir;
+      if (tableSort === "publishedAt") {
+        const at = (a.publishedAt || ""), bt = (b.publishedAt || "");
+        return at.localeCompare(bt) * dir;
+      }
       return ((a.date || "") + " " + (a.time || "99:99")).localeCompare((b.date || "") + " " + (b.time || "99:99")) * dir;
     });
   }, [posts, currentTab, tableSearch, tableContentType, tableStatus, tableSort, tableSortDir]);
 
-  const sourceForTypes = currentTab === "all" ? posts : posts.filter((p) => p.platform === currentTab);
+  // ── Pagination (client-side on filtered results) ──
+  const totalFiltered = filteredPosts.length;
+  const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const startIndex = (safePage - 1) * pageSize;
+  const paginatedPosts = filteredPosts.slice(startIndex, startIndex + pageSize);
+
+  const sourceForTypes = isAllView ? posts : posts.filter((p) => p.platform === currentTab);
   const selectedCount = Object.keys(selectedPosts).filter((id) => selectedPosts[id]).length;
-  const allSelected = filteredPosts.length > 0 && filteredPosts.every((p) => !!selectedPosts[p.id]);
+  const allSelected = paginatedPosts.length > 0 && paginatedPosts.every((p) => !!selectedPosts[p.id]);
 
   function tableTypeOptions(pl: Post[]) {
     const seen: Record<string, boolean> = { all: true };
@@ -132,83 +152,122 @@ export const Tables: React.FC<TablesProps> = ({
     return vals.map((v) => <option key={v} value={v} selected={tableContentType === v ? true : undefined}>{v === "all" ? "All content types" : escapeHtml(v)}</option>);
   }
 
-  const title = currentTab === "all" ? "All Platforms" : platformDataMap[currentTab as Platform].name;
-  const allSchema = currentTab === "all" ? null : schemaFor(currentTab as Platform);
-  const headFields = allSchema ? allSchema.map((f) => <th key={f.key}>{escapeHtml(f.label)}</th>) : null;
+  const title = isAllView ? "All Platforms" : platformDataMap[currentTab as Platform].name;
+  const platformSchema = isAllView ? null : FIELD_SCHEMA[currentTab as Platform];
+  const headSchemaFields = platformSchema
+    ? platformSchema.map((f) => <th key={f.key}>{escapeHtml(f.label)}</th>)
+    : null;
   const headMetrics = METRIC_FIELDS.map((m) => <th key={m.key}>{escapeHtml(m.label)}</th>);
-  const colCount = (selectionMode ? 1 : 0) + (currentTab === "all" ? 1 : 0) + 3 + (allSchema ? allSchema.length : 0) + METRIC_FIELDS.length + 2;
+
+  // Column count for empty-row colSpan:
+  // [checkbox] + [platform(all)] + Date + Time + Status + [ContentType+Preview(all)|schema] + published + postID + socialUrl + metrics(3) + updated + actions
+  const colCount = (selectionMode ? 1 : 0)
+    + (isAllView ? 1 : 0)  // Platform column (all view only)
+    + 3  // Date, Time, Status
+    + (isAllView ? 2 : 0)  // ContentType + Preview (all view only)
+    + (platformSchema ? platformSchema.length : 0)  // schema fields (platform view)
+    + 1 + 1 + 1  // Published, PlatformPostId, SocialUrl
+    + METRIC_FIELDS.length
+    + 1 + 1;
 
   function metricVal(p: Post, key: string): string {
     const v = (p as any)[key];
-    return (v !== undefined && v !== null && v !== "") ? String(v) : "—";
+    return (v !== undefined && v !== null && v !== "") ? String(v) : "\u2014";
   }
 
-  function renderAllRows() {
-    return filteredPosts.map((p) => {
-      const status = getStatus(p.date);
-      const selected = !!selectedPosts[p.id];
-      const checkbox = selectionMode ? <td style={{ width: 38 }} key={p.id + "_cb"}><input className="select-post" type="checkbox" data-action="select-post" data-id={p.id} checked={selected} readOnly /></td> : null;
-      const metricCells = METRIC_FIELDS.map((m) => <td key={m.key}>{metricVal(p, m.key)}</td>);
+  function renderRow(p: Post) {
+    const selected = !!selectedPosts[p.id];
+    const checkbox = selectionMode
+      ? <td style={{ width: 38 }} key={p.id + "_cb"}>
+          <input className="select-post" type="checkbox" data-action="select-post" data-id={p.id}
+            checked={selected} readOnly />
+        </td>
+      : null;
+
+    const metricCells = METRIC_FIELDS.map((m) => <td key={m.key} className="num">{metricVal(p, m.key)}</td>);
+    const publishedCell = <td className="num">{formatPublishedAt(p.publishedAt)}</td>;
+    const platformPostIdCell = <td className="num" title={p.platformPostId || ""}>{escapeHtml(p.platformPostId || "\u2014")}</td>;
+    const socialUrlCell = (
+      <td>
+        {p.socialUrl
+          ? <a href={p.socialUrl} target="_blank" rel="noopener noreferrer" className="link-cell" title={p.socialUrl}>{escapeHtml(truncate(p.socialUrl, 40))}</a>
+          : <span className="dim">\u2014</span>}
+      </td>
+    );
+
+    const rowOnClick = selectionMode
+      ? undefined
+      : (e: React.MouseEvent) => {
+          const target = e.target as HTMLElement;
+          if (target.closest(".select-post") || target.closest("[data-row-control]")) return;
+          onViewPost(p);
+        };
+
+    if (isAllView) {
+      // ── All Platforms row ──
       return (
-        <tr key={p.id} id={`table-row-${p.id}`} data-post-row={p.id} className={selected ? "selected-row" : ""}>
+        <tr key={p.id} id={`table-row-${p.id}`} data-post-row={p.id}
+            className={selected ? "selected-row" : ""} onClick={rowOnClick}>
           {checkbox}
           <td>{<PlatformIcon platform={p.platform} iconOnly />}{escapeHtml(platformDataMap[p.platform].name)}</td>
-          <td>{prettyDateShort(p.date)}</td>
-          <td>{escapeHtml(p.time || "—")}</td>
-          <td><span className={`status-badge status-${status}`}>{status === "posted" ? "Posted" : "Scheduled"}</span></td>
-          <td>{escapeHtml(p.contentType || "—")}</td>
-          <td><div className="table-cell-preview" title={escapeHtml(p.title || p.topic || p.content || "")}>{escapeHtml(truncate(p.title || p.topic || p.content || "", 90))}</div></td>
-          <td>{metricVal(p, "views")}</td>
-          <td>{metricVal(p, "likes")}</td>
-          <td>{metricVal(p, "comments")}</td>
-          <td>{relativeTime(p.metricsUpdatedAt)}</td>
-          <td data-row-control="true"><button type="button" className="btn-secondary" data-action="edit-post" data-id={p.id} onClick={() => onEditPost(p)}>Edit</button></td>
-        </tr>
-      );
-    });
-  }
-
-  function renderPlatformRows() {
-    return filteredPosts.map((p) => {
-      const status = getStatus(p.date);
-      const selected = !!selectedPosts[p.id];
-      const checkbox = selectionMode ? <td style={{ width: 38 }} key={p.id + "_cb"}><input className="select-post" type="checkbox" data-action="select-post" data-id={p.id} checked={selected} readOnly /></td> : null;
-      const fieldCells = allSchema ? allSchema.map((f) => {
-        const val = (p as any)[f.key] || "—";
-        return <td key={f.key}><div className="table-cell-preview" title={escapeHtml(val)}>{escapeHtml(val)}</div></td>;
-      }) : null;
-      const metricCells = METRIC_FIELDS.map((m) => <td key={m.key}>{metricVal(p, m.key)}</td>);
-      return (
-        <tr key={p.id} id={`table-row-${p.id}`} data-post-row={p.id} className={selected ? "selected-row" : ""}>
-          {checkbox}
-          <td>{prettyDateShort(p.date)}</td>
-          <td>{escapeHtml(p.time || "—")}</td>
-          <td><span className={`status-badge status-${status}`}>{status === "posted" ? "Posted" : "Scheduled"}</span></td>
-          {fieldCells}
+          <td className="num">{prettyDateShort(p.date)}</td>
+          <td className="num">{escapeHtml(p.time || "\u2014")}</td>
+          <td><span className={`status-badge ${getStatusClass(p.status)}`}>{getStatusLabel(p.status)}</span></td>
+          <td className="num">{escapeHtml(p.contentType || "\u2014")}</td>
+          <td>
+            <div className="table-cell-preview" title={escapeHtml(getPreview(p) || "")}>{escapeHtml(truncate(getPreview(p), 90))}</div>
+          </td>
+          {publishedCell}
+          {platformPostIdCell}
+          {socialUrlCell}
           {metricCells}
           <td>{relativeTime(p.metricsUpdatedAt)}</td>
-          <td data-row-control="true"><button type="button" className="btn-secondary" data-action="edit-post" data-id={p.id} onClick={() => onEditPost(p)}>Edit</button></td>
+          <td data-row-control="true"><button type="button" className="btn-secondary" data-action="edit-post" data-id={p.id} onClick={(e) => { e.stopPropagation(); onEditPost(p); }}>Edit</button></td>
         </tr>
       );
-    });
+    }
+
+    // ── Platform-specific row ──
+    const fieldCells = platformSchema
+      ? platformSchema.map((f) => {
+          const val = (p as any)[f.key] || "\u2014";
+          return <td key={f.key}><div className="table-cell-preview" title={escapeHtml(val)}>{escapeHtml(val)}</div></td>;
+        })
+      : null;
+
+    return (
+      <tr key={p.id} id={`table-row-${p.id}`} data-post-row={p.id}
+          className={selected ? "selected-row" : ""} onClick={rowOnClick}>
+        {checkbox}
+        <td className="num">{prettyDateShort(p.date)}</td>
+        <td className="num">{escapeHtml(p.time || "\u2014")}</td>
+        <td><span className={`status-badge ${getStatusClass(p.status)}`}>{getStatusLabel(p.status)}</span></td>
+        {fieldCells}
+        {publishedCell}
+        {platformPostIdCell}
+        {socialUrlCell}
+        {metricCells}
+        <td>{relativeTime(p.metricsUpdatedAt)}</td>
+        <td data-row-control="true"><button type="button" className="btn-secondary" data-action="edit-post" data-id={p.id} onClick={(e) => { e.stopPropagation(); onEditPost(p); }}>Edit</button></td>
+      </tr>
+    );
   }
 
-  const emptyRow = filteredPosts.length === 0 ? <tr><td colSpan={colCount} className="empty-note">No posts match the current filters.</td></tr> : null;
+  const emptyRow = totalFiltered === 0 ? <tr><td colSpan={colCount} className="empty-note">No posts match the current filters.</td></tr> : null;
 
   return (
     <div>
       <div className="table-toolbar">
         <div>
           <h2 className="table-title" style={{ margin: 0, fontSize: "1.35rem", letterSpacing: "-0.02em" }}>
-            {currentTab !== "all" && <PlatformIcon platform={currentTab} iconOnly />}
-            {title}
+            {!isAllView && <PlatformIcon platform={currentTab} iconOnly />}{title}
           </h2>
           <div style={{ color: "var(--muted)", fontSize: ".76rem", marginTop: 3 }}>
-            {filteredPosts.length} matching item{filteredPosts.length !== 1 ? "s" : ""} · Click any row to view the complete post
+            {totalFiltered} matching post{totalFiltered !== 1 ? "s" : ""} \u00b7 Click any row to view details, Edit to modify
           </div>
         </div>
         <div className="table-tabs">
-          <button type="button" className={`table-tab ${currentTab === "all" ? " active" : ""}`} data-action="table-tab" data-platform="all" onClick={() => onTabChange("all")}>All Platforms</button>
+          <button type="button" className={`table-tab ${isAllView ? " active" : ""}`} data-action="table-tab" data-platform="all" onClick={() => onTabChange("all")}>All Platforms</button>
           {PLATFORMS.map((p) => (
             <button key={p} type="button" className={`table-tab ${currentTab === p ? " active" : ""}`} data-action="table-tab" data-platform={p} onClick={() => onTabChange(p)}>
               <PlatformIcon platform={p} iconOnly /> {platformDataMap[p].name}
@@ -218,22 +277,25 @@ export const Tables: React.FC<TablesProps> = ({
       </div>
 
       <div className="table-filters">
-        <input type="search" id="tableSearch" value={tableSearch} placeholder="Search posts, topics, captions, titles…" aria-label="Search posts" onChange={(e) => onSearchChange(e.target.value)} />
+        <input type="search" id="tableSearch" value={tableSearch} placeholder="Search posts, topics, captions, titles\u2026" aria-label="Search posts" onChange={(e) => onSearchChange(e.target.value)} />
         <select id="tableContentType" aria-label="Filter by content type" value={tableContentType} onChange={(e) => onContentTypeChange(e.target.value)}>
           {tableTypeOptions(sourceForTypes)}
         </select>
         <select id="tableStatus" aria-label="Filter by status" value={tableStatus} onChange={(e) => onStatusChange(e.target.value)}>
-          <option value="all" selected={tableStatus === "all"}>All statuses</option>
-          <option value="posted" selected={tableStatus === "posted"}>Posted</option>
-          <option value="scheduled" selected={tableStatus === "scheduled"}>Scheduled</option>
+          <option value="all">All statuses</option>
+          {STATUS_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
         </select>
         <select id="tableSort" aria-label="Sort posts" value={tableSort} onChange={(e) => onSortChange(e.target.value)}>
-          <option value="date" selected={tableSort === "date"}>Sort: Date</option>
-          <option value="views" selected={tableSort === "views"}>Sort: Views</option>
-          <option value="likes" selected={tableSort === "likes"}>Sort: Likes</option>
-          <option value="comments" selected={tableSort === "comments"}>Sort: Comments</option>
-          <option value="platform" selected={tableSort === "platform"}>Sort: Platform</option>
-          <option value="contentType" selected={tableSort === "contentType"}>Sort: Content type</option>
+          <option value="date">Sort: Scheduled date</option>
+          <option value="publishedAt">Sort: Published date</option>
+          <option value="views">Sort: Views</option>
+          <option value="likes">Sort: Likes</option>
+          <option value="comments">Sort: Comments</option>
+          <option value="platform">Sort: Platform</option>
+          <option value="contentType">Sort: Content type</option>
+          <option value="status">Sort: Status</option>
         </select>
         <button type="button" className="btn-secondary btn-mini" data-action="sort-direction" onClick={onSortDirChange}>
           {tableSortDir === "desc" ? "Descending" : "Ascending"}
@@ -267,23 +329,44 @@ export const Tables: React.FC<TablesProps> = ({
         <table className="data-table">
           <thead>
             <tr>
-              {selectionMode && <th style={{ width: 38 }}></th>}
-              {currentTab === "all" && <th>Platform</th>}
-              <th>Date</th>
+              {selectionMode && <th style={{ width: 38 }} />}
+              {isAllView && <th>Platform</th>}
+              <th>Scheduled Date</th>
               <th>Time</th>
               <th>Status</th>
-              {headFields}
+              {isAllView ? <><th>Content Type</th><th>Preview</th></> : headSchemaFields}
+              <th>Published</th>
+              <th>Platform Post ID</th>
+              <th>Social URL</th>
               {headMetrics}
-              <th>Metrics updated</th>
-              <th></th>
+              <th>Metrics Updated</th>
+              <th />
             </tr>
           </thead>
           <tbody>
-            {currentTab === "all" ? renderAllRows() : renderPlatformRows()}
+            {paginatedPosts.map((p) => renderRow(p))}
             {emptyRow}
           </tbody>
         </table>
       </div>
+
+      {/* ── Pagination ── */}
+      {totalFiltered > 0 && (
+        <div className="table-pagination">
+          <span className="page-info">
+            {((safePage - 1) * pageSize + 1)}
+            {"\u2013"}
+            {Math.min(safePage * pageSize, totalFiltered)} of {totalFiltered} posts
+          </span>
+          <div className="page-controls">
+            <button type="button" className="btn-secondary btn-mini" onClick={() => onPageChange(1)} disabled={safePage === 1}>First</button>
+            <button type="button" className="btn-secondary btn-mini" onClick={() => onPageChange(safePage - 1)} disabled={safePage === 1}>Prev</button>
+            <span style={{ color: "var(--muted)", fontSize: ".72rem" }}>Page {safePage} of {totalPages}</span>
+            <button type="button" className="btn-secondary btn-mini" onClick={() => onPageChange(safePage + 1)} disabled={safePage === totalPages}>Next</button>
+            <button type="button" className="btn-secondary btn-mini" onClick={() => onPageChange(totalPages)} disabled={safePage === totalPages}>Last</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

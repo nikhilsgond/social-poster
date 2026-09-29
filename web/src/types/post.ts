@@ -32,3 +32,34 @@ export type Post = {
   createdAt?: string;
   updatedAt?: string;
 };
+
+// ── Status Helpers ──
+export function getStatusLabel(status: PostStatus | undefined): string {
+  switch (status) {
+    case "draft": return "Draft";
+    case "scheduled": return "Scheduled";
+    case "publishing": return "Publishing";
+    case "published": return "Published";
+    case "failed": return "Failed";
+    default: return "Unknown";
+  }
+}
+
+export function getStatusClass(status: PostStatus | undefined): string {
+  switch (status) {
+    case "draft": return "status-draft";
+    case "scheduled": return "status-scheduled";
+    case "publishing": return "status-publishing";
+    case "published": return "status-published";
+    case "failed": return "status-failed";
+    default: return "status-scheduled";
+  }
+}
+
+export const STATUS_OPTIONS: { value: PostStatus; label: string }[] = [
+  { value: "draft", label: "Draft" },
+  { value: "scheduled", label: "Scheduled" },
+  { value: "publishing", label: "Publishing" },
+  { value: "published", label: "Published" },
+  { value: "failed", label: "Failed" },
+];

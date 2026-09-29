@@ -7,11 +7,13 @@ import type { Platform, Post } from "../types/post";
 import { metricSummary, metricNumber, formatMetric, escapeHtml, prettyDateShort, relativeTime } from "../lib/metrics";
 
 export function usePosts() {
-  const { state, posts, dispatch, addPost, updatePost, deletePost, bulkAddPosts, movePost, clearPosts } = usePostContext();
+  const { state, posts, dispatch, addPost, updatePost, deletePost, bulkAddPosts, movePost, clearPosts, setEditPost } = usePostContext();
   return {
     posts,
     selectedPosts: state.selectedPosts,
     editPostId: state.editPostId,
+    loading: state.loading,
+    error: state.error,
     dispatch,
     addPost,
     updatePost,
@@ -19,6 +21,7 @@ export function usePosts() {
     bulkAddPosts,
     movePost,
     clearPosts,
+    setEditPost,
     postCount: posts.length,
   };
 }

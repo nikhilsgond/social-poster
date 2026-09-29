@@ -4,6 +4,7 @@ import { PlatformIcon, platformDataMap } from "../common/PlatformIcon";
 import { useToast } from "../common/Toast";
 import type { Platform, Post } from "../../types/post";
 import { FIELD_SCHEMA, METRIC_FIELDS, CONTENT_TYPES } from "../../lib/contentTypes";
+import { getStatusLabel, getStatusClass } from "../../types/post";
 
 const PLATFORMS: Platform[] = ["yt", "ig", "fb", "th", "li", "x"];
 const WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -15,6 +16,7 @@ interface CalendarProps {
   onAddPost: (preset?: { date?: string; platform?: Platform }) => void;
   onView: (view: "tables") => void;
   onJumpToTable: (postId: string, platform: Platform) => void;
+  onViewPost: (post: Post) => void;
   posts: Post[];
   selectedPosts: Record<string, boolean>;
   onToggleSelect: (id: string) => void;
@@ -25,7 +27,7 @@ interface CalendarProps {
 }
 
 export const Calendar: React.FC<CalendarProps> = ({
-  currentMonth, onNavMonth, onGoToday, onAddPost, onView, onJumpToTable,
+  currentMonth, onNavMonth, onGoToday, onAddPost, onView, onJumpToTable, onViewPost,
   posts, selectedPosts, onToggleSelect, dragPostId, onDragStart, onDragEnd, onDrop,
 }) => {
   const { showToast } = useToast();
@@ -83,11 +85,8 @@ export const Calendar: React.FC<CalendarProps> = ({
     return (str as string).replace(/[&<>"']/g, (c: string): string => c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;");
   }
 
-  function getStatus(dateStr: string): string {
-    const today = formatDate(new Date());
-    return dateStr < today ? "posted" : "scheduled";
-  }
-
+  // ── Status Helpers ──
+  // Status now comes from post.status, not date comparison
   const cells = buildMonthGrid(currentMonth.year, currentMonth.month);
   const todayStr = formatDate(new Date());
   const numRows = cells.length / 7;
@@ -194,7 +193,7 @@ export const Calendar: React.FC<CalendarProps> = ({
                 data-id={p.id}
                 data-platform={p.platform}
                 data-action="jump-table"
-                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onJumpToTable(p.id, p.platform); }}
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onViewPost(p); }}
                 onDragStart={(e) => {
                   e.stopPropagation();
                   onDragStart(p.id);
@@ -208,8 +207,9 @@ export const Calendar: React.FC<CalendarProps> = ({
                 }}
               >
                 <div className="cal-preview-meta">
-                  <span>{prettyDateShort(p.date)}{p.time ? ` · ${p.time}` : ""}</span>
+                  <span>{prettyDateShort(p.date)}{p.time ? ` \u00b7 ${p.time}` : ""}</span>
                   {p.contentType ? <span className="cal-preview-type">{escapeHtml(p.contentType)}</span> : ""}
+                  <span className={`status-badge ${getStatusClass(p.status)}`}>{getStatusLabel(p.status)}</span>
                 </div>
                 <div className="cal-preview-post-title">{escapeHtml(truncate(getPreview(p), 80))}</div>
               </button>
