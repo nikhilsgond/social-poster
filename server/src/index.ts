@@ -8,10 +8,11 @@ import http from "http";
 import path from "path";
 import { fileURLToPath } from "url";
 import { supabaseServer } from "./lib/supabase";
-import { logInfo, logError } from "./lib/logger";
+import { logInfo, logError, logWarn } from "./lib/logger";
 import { runTestMode } from "./test-mode";
-import { getDuePosts, getPostById, updatePublishingResult, updatePublishingError } from "./posts";
+import { getDuePosts, getPostById, updatePublishingResult, updatePublishingError, updateSchedulingResult, updateMetrics } from "./posts";
 import { routePublisher } from "./platforms/router";
+import { SyncMetricsService, InstagramMetricsProvider, ThreadsMetricsProvider, YouTubeMetricsProvider, FacebookMetricsProvider } from "./metrics";
 
 // Load environment variables from .env file
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -180,19 +181,14 @@ const server = http.createServer(async (req, res) => {
       const result = await routePublisher(post);
 
       if (result.success) {
-        // Update Supabase — keep status as scheduled since Facebook holds the post
+        // Update Supabase with scheduling result — keep status as "scheduled"
+        // since YouTube/Facebook hold the native future schedule
         try {
-          await supabaseServer
-            .from("posts")
-            .update({
-              platform_post_id: result.platformPostId ?? "",
-              social_url: result.socialUrl ?? "",
-              status: "scheduled",
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", id)
-            .select()
-            .single();
+          await updateSchedulingResult(
+            id,
+            result.platformPostId ?? "",
+            result.socialUrl ?? ""
+          );
         } catch (dbErr: any) {
           logError("Failed to update Supabase after scheduling", { error: dbErr.message });
         }
@@ -209,6 +205,73 @@ const server = http.createServer(async (req, res) => {
       logInfo(`Schedule route executed for ${id}`, { success: result.success });
     } catch (err: any) {
       logError("Schedule route failed", { error: err.message });
+      res.writeHead(500, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  // Metrics synchronization
+  if (url.pathname === "/metrics/sync" && req.method === "POST") {
+    try {
+      // Build metric providers for each platform
+      const providers = new Map<string, any>();
+
+      // Instagram
+      const igUserId = process.env.IG_USER_ID || "";
+      const igToken = process.env.IG_ACCESS_TOKEN || "";
+      if (igUserId && igToken) {
+        providers.set("ig", new InstagramMetricsProvider(igToken, igUserId));
+      } else {
+        logWarn("Instagram credentials not configured — Instagram metrics will be skipped");
+      }
+
+      // Threads
+      const thUserId = process.env.THREADS_USER_ID || "";
+      const thToken = process.env.THREAD_ACCESS_TOKEN || "";
+      if (thUserId && thToken) {
+        providers.set("th", new ThreadsMetricsProvider(thToken, thUserId));
+      } else {
+        logWarn("Threads credentials not configured — Threads metrics will be skipped");
+      }
+
+      // YouTube
+      const ytToken = process.env.YOUTUBE_REFRESH_TOKEN || "";
+      const ytClientId = process.env.YOUTUBE_CLIENT_ID || "";
+      const ytClientSecret = process.env.YOUTUBE_CLIENT_SECRET || "";
+      if (ytToken && ytClientId && ytClientSecret) {
+        providers.set("yt", new YouTubeMetricsProvider());
+      } else {
+        logWarn("YouTube credentials not fully configured — YouTube metrics will be skipped");
+      }
+
+      // Facebook
+      const fbPageId = process.env.META_PAGE_ID || "";
+      const fbPageToken = process.env.META_PAGE_ACCESS_TOKEN || "";
+      if (fbPageId && fbPageToken) {
+        providers.set("fb", new FacebookMetricsProvider(fbPageToken, fbPageId));
+      } else {
+        logWarn("Facebook credentials not configured — Facebook metrics will be skipped");
+      }
+
+      if (providers.size === 0) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "No platform credentials configured for metrics sync" }));
+        return;
+      }
+
+      const service = new SyncMetricsService(providers, 5);
+      const report = await service.syncAll();
+
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(report));
+      logInfo(`Metrics sync endpoint executed`, {
+        postsFound: report.summary.postsFound,
+        postsUpdated: report.summary.postsUpdated,
+        postsFailed: report.summary.postsFailed,
+      });
+    } catch (err: any) {
+      logError("Metrics sync endpoint failed", { error: err.message });
       res.writeHead(500, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: err.message }));
     }
@@ -261,6 +324,7 @@ async function start() {
     logInfo(`Test mode: POST http://localhost:${PORT}/test`);
     logInfo(`Publish post: POST http://localhost:${PORT}/publish/{id}`);
     logInfo(`Verify Facebook: GET http://localhost:${PORT}/verify-facebook`);
+    logInfo(`Metrics sync: POST http://localhost:${PORT}/metrics/sync`);
   });
 }
 

@@ -53,12 +53,6 @@ export class YouTubePublisher implements PlatformPublisher {
     }
 
     const scheduledAt = post.scheduledAt;
-    const isScheduled = scheduledAt && new Date(scheduledAt) > new Date();
-
-    if (isScheduled) {
-      logInfo(`YouTube post ${post.id} is scheduled for ${scheduledAt} — not yet due`);
-      return { success: false, error: "Post is scheduled and not yet due", isScheduled: true };
-    }
 
     try {
       // Map content type

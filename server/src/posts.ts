@@ -112,6 +112,71 @@ export async function updatePublishingError(id: string, errorMessage: string): P
   }
 }
 
+// ── Update scheduling result (native platform scheduling) ──
+// For platforms that handle future publication themselves (YouTube, Facebook).
+// Stores platform_post_id and social_url, keeps status as "scheduled".
+// Does NOT set published_at — the platform owns the actual publication time.
+
+export async function updateSchedulingResult(
+  id: string,
+  platformPostId: string,
+  socialUrl: string
+): Promise<Post | null> {
+  try {
+    const { data, error } = await supabaseServer
+      .from("posts")
+      .update({
+        platform_post_id: platformPostId,
+        social_url: socialUrl,
+        status: "scheduled",
+        updated_at: new Date().toISOString(),
+        error_message: null,
+      })
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) throw new DatabaseError(error.message);
+    return normalizeRow(data);
+  } catch (err: any) {
+    throw new DatabaseError(err.message);
+  }
+}
+
+// ── Update current metrics (from sync service) ──
+// Updates ONLY views, likes, comments, and metrics_updated_at.
+// Does NOT modify status, platform_post_id, scheduled_at, or published_at.
+// Does NOT add shares to posts (shares goes only in snapshots).
+// Shared with the metrics sync service (Phase 1) and any future metric sources.
+
+export async function updateMetrics(
+  id: string,
+  metrics: { views?: number | null; likes?: number | null; comments?: number | null }
+): Promise<Post | null> {
+  try {
+    // Only update fields that are explicitly provided (non-null/non-undefined).
+    // This preserves existing metrics when a provider returns partial or empty data.
+    const updateObj: Record<string, unknown> = {
+      metrics_updated_at: new Date().toISOString(),
+    };
+    if (metrics.views != null) updateObj.views = metrics.views;
+    if (metrics.likes != null) updateObj.likes = metrics.likes;
+    if (metrics.comments != null) updateObj.comments = metrics.comments;
+
+    const { data, error } = await supabaseServer
+      .from("posts")
+      .update(updateObj)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) throw new DatabaseError(error.message);
+    return normalizeRow(data);
+  } catch (err: any) {
+    throw new DatabaseError(err.message);
+  }
+}
+
 // ── Normalize database row to Post type ──
 
 function normalizeRow(row: any): Post {
