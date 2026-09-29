@@ -13,6 +13,7 @@ import { Metrics } from "./components/Metrics/Metrics";
 import { PostModal } from "./components/Post/PostModal";
 import { BulkImportModal } from "./components/BulkImport/BulkImportModal";
 import { CONTENT_TYPES } from "./lib/contentTypes";
+import { parseImportedPosts } from "./lib/validation";
 import type { Platform, Post, PostStatus, MetricSnapshot, DateRange, DateRangeType } from "./types/post";
 import { useDateRange, useSnapshots, useEnrichedPosts } from "./hooks/usePosts";
 import { formatTimestamp, snapshotTrendData, metricNumber, formatMetric, escapeHtml } from "./lib/metrics";
@@ -150,11 +151,15 @@ function AppContent() {
   // ── Drag state ──
   const [dragPostId, setDragPostId] = useState<string | null>(null);
 
-  // ── Bulk import state ──
+  // ── Bulk Import State ──
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
   const [bulkJsonText, setBulkJsonText] = useState("");
   const [bulkImportResult, setBulkImportResult] = useState<{ added: number; skipped: number } | null>(null);
   const [bulkErrors, setBulkErrors] = useState<string[]>([]);
+  // Preview state
+  const [importPreview, setImportPreview] = useState<{ items: Post[]; errors: string[]; warnings: string[] } | null>(null);
+  const [importConfirmed, setImportConfirmed] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   // ── Refs ──
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -253,6 +258,8 @@ function AppContent() {
     setSelectionMode(false);
     setEditPost(null);
     setShowAnalytics(false);
+    setImportPreview(null);
+    setImportConfirmed(false);
   }, []);
 
   // ── Save Post (Add or Edit) ──
@@ -390,33 +397,47 @@ function AppContent() {
 
   const printTable = useCallback(() => { window.print(); }, []);
 
-  // ── Bulk Import ──
-  const importJSON = useCallback(async () => {
+  // ── Bulk Import: parse → preview → confirm → insert ──
+  const runImportValidation = useCallback(() => {
+    if (!bulkJsonText.trim()) return;
+    setImportPreview(null);
+    setImportConfirmed(false);
     try {
-      const parsed = JSON.parse(bulkJsonText);
-      const items = Array.isArray(parsed) ? parsed : parsed.posts || [];
-      if (!items.length) { toast("Invalid data", "No posts found.", "warning"); return; }
-
-      const validItems: Post[] = [];
-      const errors: string[] = [];
-      items.forEach((item: any, i: number) => {
-        if (!item.platform || !item.date) { errors.push(`Item ${i + 1}: Missing required fields`); return; }
-        if (!PLATFORMS.includes(item.platform)) { errors.push(`Item ${i + 1}: Invalid platform "${item.platform}"`); return; }
-        validItems.push({ ...item });
-      });
-
-      if (validItems.length) {
-        await bulkAddPosts(validItems);
-        setBulkImportResult({ added: validItems.length, skipped: items.length - validItems.length });
-        setBulkErrors(errors);
-        toast("Import complete", `Added ${validItems.length} posts${errors.length ? `, ${errors.length} errors` : ""}.`, validItems.length > 0 ? "success" : "warning");
+      const result = parseImportedPosts(bulkJsonText);
+      setImportPreview(result);
+      if (!result.errors.length) {
+        showToast("Validation passed", `${result.items.length} post(s) ready to import.`, "success");
       } else {
-        setBulkErrors(errors);
+        showToast("Validation issues", `${result.errors.length} error(s), ${result.warnings.length} warning(s). Fix before importing.`, "warning");
       }
-    } catch (e) {
-      toast("Import failed", "Invalid JSON format.", "error");
+    } catch {
+      showToast("Import failed", "Invalid JSON format.", "error");
     }
-  }, [bulkJsonText, bulkAddPosts, toast]);
+  }, [bulkJsonText, showToast]);
+
+  const importJSON = useCallback(async () => {
+    if (!importPreview || importConfirmed) return;
+    setImportConfirmed(true);
+    setImporting(true);
+    try {
+      const validItems = importPreview.items;
+      if (!validItems.length) {
+        setBulkImportResult({ added: 0, skipped: 0 });
+        setBulkErrors(importPreview.errors);
+        showToast("Nothing to import", "No valid posts after validation.", "warning");
+        setImporting(false);
+        return;
+      }
+      const created = await bulkAddPosts(validItems);
+      setBulkImportResult({ added: created.length, skipped: validItems.length - created.length });
+      setBulkErrors(importPreview.errors);
+      showToast("Import complete", `${created.length} post(s) added${importPreview.errors.length ? `, ${importPreview.errors.length} error(s)` : ""}.`, created.length > 0 ? "success" : "warning");
+    } catch (e: any) {
+      showToast("Import failed", e?.message || "Bulk insert failed.", "error");
+    } finally {
+      setImporting(false);
+    }
+  }, [importPreview, importConfirmed, bulkAddPosts, showToast]);
 
   const handleFileDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -780,9 +801,9 @@ function AppContent() {
       {/* ── Bulk Import Modal ── */}
       {bulkImportOpen && (
         <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}>
-          <div className="panel" style={{ maxWidth: 600 }}>
+          <div className="panel" style={{ maxWidth: 700 }}>
             <h3>Bulk Import JSON</h3>
-            <p className="sub">Import multiple posts at once from a JSON array.</p>
+            <p className="sub">Import multiple posts at once from a JSON array. Review the preview before inserting.</p>
             <label>Upload File</label>
             <div className="file-drop" onClick={() => fileInputRef.current?.click()} onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add("drag-over"); }} onDragLeave={(e) => e.currentTarget.classList.remove("drag-over")} onDrop={handleFileDrop}>
               <input ref={fileInputRef} type="file" accept=".json" onChange={handleFileSelect} style={{ display: "none" }} />
@@ -790,20 +811,76 @@ function AppContent() {
               <span>or click to browse</span>
             </div>
             <label>Or paste JSON</label>
-            <textarea className="json-code" style={{ minHeight: 180, width: "100%", fontFamily: "ui-monospace, monospace", fontSize: ".75rem", padding: 10, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel-alt)", color: "var(--text)", resize: "vertical" }} value={bulkJsonText} onChange={(e) => setBulkJsonText(e.target.value)} placeholder='[{"platform":"yt","date":"2025-01-15","contentType":"Video","title":"My Video"},...]' />
+            <textarea className="json-code" style={{ minHeight: 140, width: "100%", fontFamily: "ui-monospace, monospace", fontSize: ".75rem", padding: 10, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel-alt)", color: "var(--text)", resize: "vertical" }} value={bulkJsonText} onChange={(e) => { setBulkJsonText(e.target.value); setImportPreview(null); setImportConfirmed(false); }} placeholder='[{"platform":"yt","date":"2025-01-15","contentType":"Video","title":"My Video"},...]' />
+            <div style={{ display: "flex", gap: 8, margin: "10px 0" }}>
+              <button type="button" className="btn-primary" onClick={runImportValidation} disabled={!bulkJsonText.trim()}>Validate &amp; Preview</button>
+            </div>
+
+            {/* ── Import Summary ── */}
             {bulkImportResult && (
               <div className="bulk-summary">
                 <div className="bulk-stat">Added: <strong>{bulkImportResult.added}</strong></div>
                 <div className="bulk-stat">Skipped: <strong>{bulkImportResult.skipped}</strong></div>
               </div>
             )}
-            {bulkErrors.length > 0 && (
+
+            {/* ── Preview Table ── */}
+            {importPreview && (
+              <div style={{ margin: "12px 0" }}>
+                <div style={{ fontSize: ".78rem", color: "var(--muted)", marginBottom: 6 }}>
+                  {importPreview.items.length} valid row(s) · {importPreview.errors.length} error(s) · {importPreview.warnings.length} warning(s)
+                </div>
+                <div style={{ maxHeight: 260, overflow: "auto", border: "1px solid var(--border)", borderRadius: 8 }}>
+                  <table className="data-table preview-table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: 40 }}>#</th>
+                        <th>Platform</th>
+                        <th>Date</th>
+                        <th>Type</th>
+                        <th>Title / Caption</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importPreview.items.map((item, i) => (
+                        <tr key={i}>
+                          <td className="num">{i + 1}</td>
+                          <td>{item.platform.toUpperCase()}</td>
+                          <td>{item.date}</td>
+                          <td>{item.contentType || "—"}</td>
+                          <td className="table-cell-preview">{item.title || item.caption || item.content || item.topic || "—"}</td>
+                          <td><span className={"status-badge status-" + item.status}>{item.status}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {importPreview.errors.length > 0 && (
+                  <div className="bulk-errors" style={{ marginTop: 8 }}>{importPreview.errors.map((err, i) => <div key={i} className="error">{err}</div>)}</div>
+                )}
+                {importPreview.warnings.length > 0 && (
+                  <div className="bulk-errors" style={{ marginTop: 8, borderColor: "#b45309" }}>{importPreview.warnings.map((w, i) => <div key={i} className="error">{w}</div>)}</div>
+                )}
+              </div>
+            )}
+
+            {/* ── Errors (no preview yet) ── */}
+            {bulkErrors.length > 0 && !importPreview && (
               <div className="bulk-errors">{bulkErrors.map((err, i) => <div key={i} className="error">{err}</div>)}</div>
             )}
+
             <div className="panel-actions">
+              <div className="left">
+                {importConfirmed && (
+                  <button type="button" className="btn-secondary btn-mini" onClick={() => { setImportConfirmed(false); setImportPreview(null); }}>Edit</button>
+                )}
+              </div>
               <div className="right">
                 <button type="button" className="btn-secondary" onClick={closeModal}>Cancel</button>
-                <button type="button" className="btn-primary" onClick={importJSON} disabled={!bulkJsonText.trim()}>Import</button>
+                <button type="button" className="btn-primary" onClick={importJSON} disabled={!importPreview || importPreview.errors.length > 0 || importing || importConfirmed}>
+                  {importing ? "Importing…" : importConfirmed ? "Imported" : "Confirm Import"}
+                </button>
               </div>
             </div>
           </div>

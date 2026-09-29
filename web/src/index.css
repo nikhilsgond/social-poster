@@ -372,6 +372,10 @@ table.data-table td.link-cell:hover { color: var(--text); }
 .bulk-errors .error { padding: 5px 0; border-bottom: 1px solid var(--border); }
 .bulk-errors .error:last-child { border-bottom: none; }
 .bulk-ok { border: 1px solid var(--border); background: var(--panel-alt); border-radius: 8px; padding: 10px 12px; font-size: .78rem; }
+.preview-table { width: 100%; border-collapse: collapse; font-size: .72rem; }
+.preview-table th { background: var(--panel-alt); text-align: left; padding: 8px 10px; font-weight: 700; color: var(--muted); font-size: .63rem; text-transform: uppercase; border-bottom: 1px solid var(--border); }
+.preview-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.preview-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .json-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .7rem; line-height: 1.55; background: var(--panel-alt); border: 1px solid var(--border); border-radius: 8px; padding: 10px; white-space: pre-wrap; overflow: auto; }
 .file-drop { border: 1px dashed var(--border); border-radius: 9px; padding: 18px; text-align: center; background: var(--panel-alt); cursor: pointer; }
 .file-drop:hover { border-color: var(--text); }

@@ -57,7 +57,7 @@ interface PostContextType {
   addPost: (post: Omit<Post, "id" | "createdAt" | "updatedAt">) => Promise<void>;
   updatePost: (id: string, changes: Partial<Post>) => Promise<void>;
   deletePost: (id: string) => Promise<void>;
-  bulkAddPosts: (posts: Post[]) => Promise<void>;
+  bulkAddPosts: (posts: Post[]) => Promise<Post[]>;
   movePost: (id: string, newDate: string) => Promise<void>;
   clearPosts: () => void;
   toggleSelect: (id: string) => void;
@@ -226,7 +226,7 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
     }
   }, [showToast]);
 
-  const bulkAddPostsFn = useCallback(async (posts: Post[]) => {
+  const bulkAddPostsFn = useCallback(async (posts: Post[]): Promise<Post[]> => {
     try {
       dispatch({ type: "PUSH_SNAPSHOT" });
       const created = await createPosts(posts);
@@ -234,8 +234,10 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
         dispatch({ type: "BULK_ADD_POSTS", payload: created });
         showToast("Import complete", `${created.length} posts imported.`, "success");
       }
+      return created;
     } catch (err: any) {
       showToast("Error", formatSupabaseError(err), "error");
+      return [];
     }
   }, [showToast]);
 
