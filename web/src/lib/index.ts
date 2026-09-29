@@ -5,7 +5,7 @@ export { generatePostId } from "./data";
 export type {} from "./data";
 export { validatePost, parseImportedPosts, normalizePost, generateId } from "./validation";
 export type { ValidationResult, BulkValidationResult } from "./validation";
-export { metricSummary, formatMetric, escapeHtml, prettyDateShort, relativeTime, metricNumber, platformStats, contentTypeChartData, viewsTrendData, weekdayChartData, engagementByType, topPosts, platformPerformance, performanceAnalysis } from "./metrics";
+export { metricSummary, formatMetric, escapeHtml, prettyDateShort, relativeTime, metricNumber, platformStats, contentTypeChartData, viewsTrendData, weekdayChartData, engagementByType, topPosts, platformPerformance, performanceAnalysis, DATE_RANGE_OPTIONS, filterPostsByDateRange, snapshotSummary, latestSnapshotsByPost, snapshotTrendData, snapshotPlatformStats, enrichPostsWithSnapshots, latestSnapshot, formatTimestamp } from "./metrics";
 export {
   uploadToCloudinary,
   uploadVideoToCloudinary,

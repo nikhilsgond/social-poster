@@ -3,7 +3,7 @@
 // These are pure functions — no state, no side effects.
 // All UI components call these to derive metrics from posts.
 
-import type { Post, Platform } from "../types/post";
+import type { Post, Platform, MetricSnapshot, DateRange } from "../types/post";
 import { platformDataMap } from "../components/common/PlatformIcon";
 
 // ── Metric Helpers ──
@@ -164,3 +164,148 @@ export function relativeTime(ts: string | null | undefined): string {
   if (diff < day * 30) return Math.floor(diff / day) + "d ago";
   return new Date(Number(ts)).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
+
+// ── Date Range Options ──
+export const DATE_RANGE_OPTIONS: { value: string; label: string }[] = [
+  { value: "7d", label: "Last 7 days" },
+  { value: "30d", label: "Last 30 days" },
+  { value: "90d", label: "Last 90 days" },
+  { value: "custom", label: "Custom range" },
+];
+
+// ── Filter posts by date range (by publication date) ──
+export function filterPostsByDateRange(pool: Post[], range: DateRange): Post[] {
+  if (!range || !range.startDate) return pool;
+  const start = new Date(range.startDate);
+  const end = new Date(range.endDate + "T23:59:59");
+  return pool.filter((p) => {
+    if (!p.date || p.date === "Unknown") return false;
+    const d = new Date(p.date);
+    return d >= start && d <= end;
+  });
+}
+
+// ── Snapshot Summary (includes shares) ──
+export interface SnapshotSummary {
+  count: number;        // total snapshot count
+  postCount: number;    // unique posts with snapshots
+  views: number;
+  likes: number;
+  comments: number;
+  shares: number;
+  avgViews: number;
+  engagement: number;
+}
+
+export function snapshotSummary(snapshots: MetricSnapshot[]): SnapshotSummary {
+  if (!snapshots.length) return { count: 0, postCount: 0, views: 0, likes: 0, comments: 0, shares: 0, avgViews: 0, engagement: 0 };
+  const views = snapshots.reduce((s, x) => s + x.views, 0);
+  const likes = snapshots.reduce((s, x) => s + x.likes, 0);
+  const comments = snapshots.reduce((s, x) => s + x.comments, 0);
+  const shares = snapshots.reduce((s, x) => s + x.shares, 0);
+  const postCount = new Set(snapshots.map((s) => s.postId)).size;
+  return {
+    count: snapshots.length,
+    postCount,
+    views, likes, comments, shares,
+    avgViews: postCount ? views / postCount : 0,
+    engagement: views ? ((likes + comments) / views) * 100 : 0,
+  };
+}
+
+// ── Latest snapshot per post ──
+export function latestSnapshotsByPost(snapshots: MetricSnapshot[]): Map<string, MetricSnapshot> {
+  const map = new Map<string, MetricSnapshot>();
+  snapshots.forEach((s) => {
+    const existing = map.get(s.postId);
+    if (!existing || new Date(s.capturedAt) > new Date(existing.capturedAt)) {
+      map.set(s.postId, s);
+    }
+  });
+  return map;
+}
+
+// ── Snapshot Trend Data (group by captured_at date) ──
+export interface TrendData { dates: string[]; values: number[] }
+
+export function snapshotTrendData(snapshots: MetricSnapshot[], metric: "views" | "likes" | "comments" | "shares"): TrendData {
+  const byDate: Record<string, number> = {};
+  snapshots.forEach((s) => {
+    if (!s.capturedAt) return;
+    const day = new Date(s.capturedAt).toISOString().split("T")[0];
+    byDate[day] = (byDate[day] || 0) + (s[metric] || 0);
+  });
+  const dates = Object.keys(byDate).sort();
+  const values = dates.map((d) => byDate[d]);
+  return { dates, values };
+}
+
+// ── Snapshot Platform Stats ──
+export interface SnapshotPlatformStat {
+  key: Platform;
+  posts: number;
+  views: number;
+  likes: number;
+  comments: number;
+  shares: number;
+  engagement: number;
+}
+
+export function snapshotPlatformStats(snapshots: MetricSnapshot[]): SnapshotPlatformStat[] {
+  const platforms = ["yt", "ig", "fb", "th", "li", "x"] as Platform[];
+  const byPlatform: Record<string, MetricSnapshot[]> = {};
+  snapshots.forEach((s) => {
+    if (!byPlatform[s.platform]) byPlatform[s.platform] = [];
+    byPlatform[s.platform].push(s);
+  });
+  return platforms.map((p) => {
+    const ps = byPlatform[p] || [];
+    const latestMap = latestSnapshotsByPost(ps);
+    const latest = Array.from(latestMap.values());
+    const views = latest.reduce((s, x) => s + x.views, 0);
+    const likes = latest.reduce((s, x) => s + x.likes, 0);
+    const comments = latest.reduce((s, x) => s + x.comments, 0);
+    const shares = latest.reduce((s, x) => s + x.shares, 0);
+    return {
+      key: p,
+      posts: latest.length,
+      views, likes, comments, shares,
+      engagement: views ? ((likes + comments) / views) * 100 : 0,
+    };
+  });
+}
+
+// ── Merge posts with latest snapshot data (for post-level metrics in tables/modals) ──
+export function enrichPostsWithSnapshots(posts: Post[], snapshots: MetricSnapshot[]): Post[] {
+  const latestMap = latestSnapshotsByPost(snapshots);
+  return posts.map((p) => {
+    const snap = latestMap.get(p.id);
+    if (!snap) return p;
+    return { ...p, shares: snap.shares };
+  });
+}
+
+// ── Snapshot for a single post (latest) ──
+export function latestSnapshot(snapshots: MetricSnapshot[]): MetricSnapshot | null {
+  if (!snapshots.length) return null;
+  return snapshots.reduce((latest, s) =>
+    new Date(s.capturedAt) > new Date(latest.capturedAt) ? s : latest
+  );
+}
+
+// ── Format timestamp for analytics display ──
+export function formatTimestamp(ts: string | null | undefined): string {
+  if (!ts) return "\u2014";
+  return new Date(ts).toLocaleString("en-US", {
+    month: "short", day: "numeric", year: "numeric",
+    hour: "numeric", minute: "2-digit",
+  });
+}
+
+// ── Metrics options for sorting ──
+export const METRIC_OPTIONS = [
+  { value: "views", label: "Views" },
+  { value: "likes", label: "Likes" },
+  { value: "comments", label: "Comments" },
+  { value: "shares", label: "Shares" },
+];

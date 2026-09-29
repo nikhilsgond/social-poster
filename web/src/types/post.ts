@@ -2,6 +2,28 @@ export type Platform = "yt" | "ig" | "fb" | "th" | "li" | "x";
 
 export type PostStatus = "draft" | "scheduled" | "publishing" | "published" | "failed";
 
+// ── Date Range ──
+export type DateRangeType = "7d" | "30d" | "90d" | "custom";
+
+export interface DateRange {
+  type: DateRangeType;
+  startDate: string;  // ISO date string YYYY-MM-DD
+  endDate: string;    // ISO date string YYYY-MM-DD
+}
+
+// ── Historical Metric Snapshot (from post_metric_snapshots table) ──
+export interface MetricSnapshot {
+  id: string;
+  postId: string;
+  platform: Platform;
+  capturedAt: string;      // ISO timestamp from captured_at
+  views: number;
+  likes: number;
+  comments: number;
+  shares: number;
+  platformMetrics: Record<string, any> | null;  // JSONB from platform_metrics
+}
+
 export type Post = {
   id: string;
   platform: Platform;
@@ -26,6 +48,7 @@ export type Post = {
   views?: number;
   likes?: number;
   comments?: number;
+  shares?: number;        // From snapshots (latest), not in posts table
   metricsUpdatedAt?: string | null;
   sourceId?: string | null;
   permalink?: string | null;

@@ -208,6 +208,7 @@ table.data-table td.link-cell:hover { color: var(--text); }
 .detail-item-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .detail-field { font-size: 0.82rem; margin-bottom: 4px; }
 .detail-field b { font-weight: 600; }
+.detail-fields { display: flex; flex-direction: column; gap: 4px; }
 .detail-item-actions { display: flex; gap: 6px; margin-top: 10px; }
 .detail-item-actions button { font-size: 0.75rem; border: 1px solid var(--border); background: var(--panel-alt); padding: 6px 10px; border-radius: 6px; cursor: pointer; color: var(--text); font-family: inherit; }
 .detail-item-actions button:hover { background: var(--panel); border-color: var(--text); }
@@ -248,6 +249,61 @@ table.data-table td.link-cell:hover { color: var(--text); }
 .metrics-tab.active { background: var(--text); color: var(--bg); border-color: var(--text); }
 .metrics-context { display: flex; align-items: center; gap: 9px; margin: 2px 0 15px; color: var(--muted); font-size: .76rem; }
 .metrics-context strong { color: var(--text); font-size: .9rem; }
+
+/* Date Range Selector */
+.date-range-selector { display: flex; flex-direction: column; gap: 8px; }
+.date-range-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.date-range-chip {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: .72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .16s ease;
+  white-space: nowrap;
+}
+.date-range-chip:hover { background: var(--panel-alt); color: var(--text); }
+.date-range-chip.active {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+.date-range-custom { display: flex; align-items: center; gap: 8px; font-size: .7rem; color: var(--muted); }
+.date-range-custom input[type="date"] {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 6px;
+  font: inherit;
+  font-size: .72rem;
+}
+
+/* Inline code in subtitles */
+.chart-subtitle code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .65rem;
+  color: var(--muted);
+  background: var(--panel-alt);
+  padding: 1px 5px;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+/* Hint bar */
+.hint-bar {
+  display: inline-block;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--panel-alt);
+  font-size: .74rem;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
 .kpi-grid { display: grid; grid-template-columns: repeat(6, minmax(0,1fr)); gap: 10px; margin-bottom: 14px; }
 .kpi-card { background: var(--panel); border: 1px solid var(--border); border-radius: 11px; padding: 13px 14px; min-width: 0; box-shadow: 0 1px 2px rgba(0,0,0,.5); }
 .kpi-label { font-size: .66rem; color: var(--muted); font-weight: 650; text-transform: uppercase; letter-spacing: .055em; }
@@ -440,4 +496,36 @@ table.data-table td.link-cell:hover { color: var(--text); }
 /* ========== Reduced Motion ========== */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+/* ========== Post Modal Analytics Tabs ========== */
+.analytics-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.analytics-tab {
+  padding: 8px 16px;
+  border-radius: 6px 6px 0 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.83rem;
+  font-weight: 600;
+  font-family: inherit;
+}
+.analytics-tab.active {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+.analytics-tab:hover {
+  background: var(--panel-alt);
+}
+
+/* Post Analytics Section */
+.post-analytics {
+  margin-top: 16px;
 }

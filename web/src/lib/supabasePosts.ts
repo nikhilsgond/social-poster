@@ -4,8 +4,68 @@
 // This keeps all database code centralized and out of components.
 
 import { supabase } from "./supabase";
-import type { Post } from "../types/post";
+import type { Post, MetricSnapshot, DateRange } from "../types/post";
 import { normalizePost } from "./validation";
+
+// ── Date Range Helpers ──
+export function computeDateRange(type: "7d" | "30d" | "90d" | "custom", startDate?: string, endDate?: string): DateRange {
+  const now = new Date();
+  if (type === "custom" && startDate && endDate) {
+    return { type, startDate, endDate };
+  }
+  const days = type === "7d" ? 7 : type === "30d" ? 30 : type === "90d" ? 90 : 30;
+  const end = new Date(now);
+  const start = new Date(now.getTime() - days * 86400000);
+  return {
+    type,
+    startDate: start.toISOString().split("T")[0],
+    endDate: end.toISOString().split("T")[0],
+  };
+}
+
+// ── Snapshot Row → MetricSnapshot ──
+function snapshotRowToSnapshot(row: any): MetricSnapshot {
+  return {
+    id: row.id,
+    postId: row.post_id,
+    platform: row.platform,
+    capturedAt: row.captured_at,
+    views: row.views ?? 0,
+    likes: row.likes ?? 0,
+    comments: row.comments ?? 0,
+    shares: row.shares ?? 0,
+    platformMetrics: row.platform_metrics || null,
+  };
+}
+
+// ── Fetch Snapshots (optionally filtered by date range on captured_at) ──
+export async function fetchSnapshots(dateRange?: DateRange): Promise<MetricSnapshot[]> {
+  let query = supabase
+    .from("post_metric_snapshots")
+    .select("*")
+    .order("captured_at", { ascending: true });
+
+  if (dateRange) {
+    const startIso = dateRange.startDate + "T00:00:00";
+    const endIso = dateRange.endDate + "T23:59:59";
+    query = query.gte("captured_at", startIso).lte("captured_at", endIso);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return (data || []).map(snapshotRowToSnapshot);
+}
+
+// ── Fetch Snapshots for a specific post ──
+export async function fetchPostSnapshots(postId: string): Promise<MetricSnapshot[]> {
+  const { data, error } = await supabase
+    .from("post_metric_snapshots")
+    .select("*")
+    .eq("post_id", postId)
+    .order("captured_at", { ascending: true });
+  if (error) throw error;
+  return (data || []).map(snapshotRowToSnapshot);
+}
 
 // ── Database Row → Application Post ──
 // Maps Supabase snake_case columns to the application's camelCase Post model.

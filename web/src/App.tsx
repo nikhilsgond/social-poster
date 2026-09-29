@@ -13,7 +13,10 @@ import { Metrics } from "./components/Metrics/Metrics";
 import { PostModal } from "./components/Post/PostModal";
 import { BulkImportModal } from "./components/BulkImport/BulkImportModal";
 import { CONTENT_TYPES } from "./lib/contentTypes";
-import type { Platform, Post, PostStatus } from "./types/post";
+import type { Platform, Post, PostStatus, MetricSnapshot, DateRange, DateRangeType } from "./types/post";
+import { useDateRange, useSnapshots, useEnrichedPosts } from "./hooks/usePosts";
+import { formatTimestamp, snapshotTrendData, metricNumber, formatMetric, escapeHtml } from "./lib/metrics";
+import type { SnapshotSummary, SnapshotPlatformStat, TrendData } from "./lib/metrics";
 import "./index.css";
 
 type View = "calendar" | "tables" | "metrics";
@@ -27,6 +30,7 @@ function loadUrlState(): Partial<{
   tableContentType: string; tableStatus: string; tableSort: string; tableSortDir: string;
   tablePage: number;
   metricsTab: string; analysisMetric: string; analysisDimension: string; editPostId: string;
+  dateRange: string; customStart: string; customEnd: string;
 }> {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -45,6 +49,9 @@ function loadUrlState(): Partial<{
       analysisMetric: params.get("metric") || "views",
       analysisDimension: params.get("dimension") || "contentType",
       editPostId: params.get("edit") || "",
+      dateRange: params.get("range") || "30d",
+      customStart: params.get("start") || "",
+      customEnd: params.get("end") || "",
     };
   } catch { return {}; }
 }
@@ -61,6 +68,9 @@ function syncUrlState(state: Record<string, string | number | boolean | undefine
   if (state.year) params.set("year", String(state.year));
   if (state.month !== undefined) params.set("month", String(state.month));
   if (state.tablePage) params.set("page", String(state.tablePage));
+  if (state.dateRange) params.set("range", String(state.dateRange));
+  if (state.customStart) params.set("start", String(state.customStart));
+  if (state.customEnd) params.set("end", String(state.customEnd));
   const search = params.toString();
   const newUrl = search ? `${window.location.pathname}?${search}` : window.location.pathname;
   window.history.replaceState(null, "", newUrl);
@@ -94,6 +104,21 @@ function AppContent() {
   const [analysisMetric, setAnalysisMetric] = useState(() => loadUrlState().analysisMetric || "views");
   const [analysisDimension, setAnalysisDimension] = useState(() => loadUrlState().analysisDimension || "contentType");
 
+  // ── Analytics Date Range state ──
+  const urlState = loadUrlState();
+  const initialRangeType = (urlState.dateRange as DateRangeType) || "30d";
+  const { type: dateRangeType, setType: setDateRangeType, customStart, customEnd, setCustomStart, setCustomEnd, range: dateRange } = useDateRange(initialRangeType);
+  // Sync customStart/customEnd from URL if present
+  useEffect(() => {
+    if (urlState.customStart) setCustomStart(urlState.customStart);
+    if (urlState.customEnd) setCustomEnd(urlState.customEnd);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // ── Analytics snapshots ──
+  const { snapshots, loading: snapshotLoading, error: snapshotError, latestMap } = useSnapshots(dateRange);
+  // Enrich posts with latest snapshot data (e.g. shares)
+  const { posts: enrichedPosts } = useEnrichedPosts(snapshots);
+
   // ── Table pagination state ──
   const [tablePageSize] = useState(15);
   const [tablePage, setTablePage] = useState(() => {
@@ -119,6 +144,9 @@ function AppContent() {
   const [modalMediaUrl, setModalMediaUrl] = useState("");
   const [modalStatus, setModalStatus] = useState<PostStatus>("scheduled");
 
+  // ── Modal analytics toggle ──
+  const [showAnalytics, setShowAnalytics] = useState(false);
+
   // ── Drag state ──
   const [dragPostId, setDragPostId] = useState<string | null>(null);
 
@@ -137,8 +165,11 @@ function AppContent() {
       view, year: currentMonth.year, month: currentMonth.month,
       tableTab, tableSearch, tableContentType, tableStatus, tableSort, tableSortDir, tablePage,
       metricsTab, analysisMetric, analysisDimension, selectionMode: selectionMode || undefined,
+      dateRange: dateRangeType,
+      customStart: dateRangeType === "custom" && customStart ? customStart : undefined,
+      customEnd: dateRangeType === "custom" && customEnd ? customEnd : undefined,
     });
-  }, [view, currentMonth, tableTab, tableSearch, tableContentType, tableStatus, tableSort, tableSortDir, tablePage, metricsTab, analysisMetric, analysisDimension, selectionMode]);
+  }, [view, currentMonth, tableTab, tableSearch, tableContentType, tableStatus, tableSort, tableSortDir, tablePage, metricsTab, analysisMetric, analysisDimension, selectionMode, dateRangeType, customStart, customEnd]);
 
   useEffect(() => { syncUrl(); }, [syncUrl]);
 
@@ -157,6 +188,9 @@ function AppContent() {
     if (urlState.metricsTab) setMetricsTab(urlState.metricsTab as Platform | "all");
     if (urlState.analysisMetric) setAnalysisMetric(urlState.analysisMetric);
     if (urlState.analysisDimension) setAnalysisDimension(urlState.analysisDimension);
+    if (urlState.dateRange) setDateRangeType(urlState.dateRange as DateRangeType);
+    if (urlState.customStart) setCustomStart(urlState.customStart);
+    if (urlState.customEnd) setCustomEnd(urlState.customEnd);
     if (urlState.editPostId) {
       const post = posts.find((p) => p.id === urlState.editPostId);
       if (post) openEditModal(post);
@@ -195,6 +229,7 @@ function AppContent() {
     setModalOpen(true);
     setModalPreset(null);
     setEditPost(post.id);
+    setShowAnalytics(false);
     setModalPlatform(post.platform);
     setModalDate(post.date);
     setModalTime(post.time);
@@ -217,6 +252,7 @@ function AppContent() {
     setBulkErrors([]);
     setSelectionMode(false);
     setEditPost(null);
+    setShowAnalytics(false);
   }, []);
 
   // ── Save Post (Add or Edit) ──
@@ -553,11 +589,24 @@ function AppContent() {
             <Metrics
               metricsTab={metricsTab}
               onTabChange={(tab: string) => setMetricsTab(tab as any)}
-              posts={posts}
+              posts={enrichedPosts}
               analysisMetric={analysisMetric}
               onAnalysisMetricChange={setAnalysisMetric}
               analysisDimension={analysisDimension}
               onAnalysisDimensionChange={setAnalysisDimension}
+              // Date range props
+              dateRange={dateRange}
+              dateRangeType={dateRangeType}
+              onDateRangeTypeChange={setDateRangeType}
+              customStartDate={customStart}
+              customEndDate={customEnd}
+              onCustomStartDateChange={setCustomStart}
+              onCustomEndDateChange={setCustomEnd}
+              // Snapshot props
+              snapshots={snapshots}
+              snapshotLoading={snapshotLoading}
+              snapshotError={snapshotError}
+
             />
           )}
         </div>
@@ -633,6 +682,83 @@ function AppContent() {
               <option value="draft">Draft</option>
               <option value="failed">Failed</option>
             </select>
+
+            {/* ── Post Analytics (edit mode only) ── */}
+            {editPostId && (
+              <>
+                <button
+                  type="button"
+                  className="btn-secondary btn-mini"
+                  style={{ marginTop: 8 }}
+                  onClick={() => setShowAnalytics(!showAnalytics)}
+                >
+                  {showAnalytics ? "▼ Hide analytics" : "▶ Show analytics"}
+                </button>
+                {showAnalytics && (() => {
+                  const post = posts.find((p) => p.id === editPostId);
+                  if (!post) return null;
+                  const latestSnap = latestMap.get(post.id);
+                  const postSnapshots = snapshots.filter((s) => s.postId === post.id);
+                  const trend = snapshotTrendData(postSnapshots, "views");
+                  const platformMetrics = latestSnap?.platformMetrics || {};
+                  const pmEntries = Object.entries(platformMetrics);
+                  return (
+                    <div className="post-analytics" style={{ marginTop: 12 }}>
+                      <h4 style={{ margin: "0 0 8px", fontSize: ".78rem", fontWeight: 700 }}>Performance Analytics</h4>
+
+                      {/* Current metrics */}
+                      <div className="detail-item">
+                        <div className="detail-item-head"><span>Current metrics</span></div>
+                        <div className="detail-fields">
+                          <div className="detail-field"><b>Views:</b> {formatMetric(metricNumber(post, "views"))}</div>
+                          <div className="detail-field"><b>Likes:</b> {formatMetric(metricNumber(post, "likes"))}</div>
+                          <div className="detail-field"><b>Comments:</b> {formatMetric(metricNumber(post, "comments"))}</div>
+                          <div className="detail-field"><b>Shares:</b> {latestSnap ? formatMetric(latestSnap.shares) : "—"}</div>
+                          <div className="detail-field"><b>Last updated:</b> {formatTimestamp(post.metricsUpdatedAt)}</div>
+                        </div>
+                      </div>
+
+                      {/* Platform-specific metrics */}
+                      {pmEntries.length > 0 && (
+                        <div className="detail-item">
+                          <div className="detail-item-head"><span>Platform-specific metrics</span></div>
+                          <div className="detail-fields">
+                            {pmEntries.slice(0, 8).map(([k, v]) => (
+                              <div key={k} className="detail-field"><b>{escapeHtml(k)}:</b> {typeof v === "number" ? v.toLocaleString() : escapeHtml(String(v))}</div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Historical snapshots table */}
+                      <div className="detail-item">
+                        <div className="detail-item-head"><span>Snapshot history ({postSnapshots.length} captures)</span></div>
+                        {postSnapshots.length > 0 ? (
+                          <table className="analysis-table" style={{ fontSize: ".68rem" }}>
+                            <thead>
+                              <tr><th>Captured</th><th>Views</th><th>Likes</th><th>Comments</th><th>Shares</th></tr>
+                            </thead>
+                            <tbody>
+                              {postSnapshots.map((s) => (
+                                <tr key={s.id}>
+                                  <td>{escapeHtml(formatTimestamp(s.capturedAt))}</td>
+                                  <td className="num">{s.views}</td>
+                                  <td className="num">{s.likes}</td>
+                                  <td className="num">{s.comments}</td>
+                                  <td className="num">{s.shares}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        ) : (
+                          <div className="empty-metrics" style={{ padding: "16px 10px" }}>No snapshot data yet. Run a metrics sync to populate.</div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </>
+            )}
 
             <div className="panel-actions">
               <div className="left">

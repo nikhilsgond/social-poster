@@ -252,12 +252,6 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
     }
   }, [showToast]);
 
-  const setSelPosts = useCallback((posts: Record<string, boolean>) => {
-    // State is accessed via state.selectedPosts directly
-    // The setSelectedPosts function updates selectedPosts in the reducer via dispatch
-    // Actually, selectedPosts should be managed through the reducer
-  }, []);
-
   const setEditPost = useCallback((id: string | null) => {
     dispatch({ type: "SET_EDIT_POST", payload: id });
   }, [dispatch]);
@@ -267,14 +261,22 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
   const canUndo = state.historyIndex > 0;
   const canRedo = state.historyIndex < state.history.length - 1;
 
+  const toggleSelect = useCallback((id: string) => {
+    dispatch({ type: "SELECT_TOGGLE", payload: id });
+  }, [dispatch]);
+
+  const setSelectedPosts = useCallback((posts: Record<string, boolean>) => {
+    dispatch({ type: "SET_SELECTED", payload: posts });
+  }, [dispatch]);
+
   return (
     <PostContext.Provider value={{
       state, posts: state.posts, dispatch,
       addPost, updatePost: updatePostFn, deletePost: deletePostFn,
       bulkAddPosts: bulkAddPostsFn, movePost: movePostFn,
       clearPosts: () => dispatch({ type: "CLEAR_POSTS" }),
-      toggleSelect: () => {},
-      setSelectedPosts: () => {},
+      toggleSelect,
+      setSelectedPosts,
       setEditPost,
       undo, redo, canUndo, canRedo,
     }}>
