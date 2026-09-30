@@ -34,8 +34,8 @@ function mapToYouTubeContentType(contentType: string | undefined): string {
 export class YouTubePublisher implements PlatformPublisher {
   private client: YouTubeGraphClient;
 
-  constructor(userId: string, accessToken: string, refreshToken: string) {
-    this.client = new YouTubeGraphClient({ userId, accessToken, refreshToken });
+  constructor(clientId: string, clientSecret: string, refreshToken: string) {
+    this.client = new YouTubeGraphClient({ clientId, clientSecret, refreshToken });
   }
 
   async publish(post: Post): Promise<PublishResult> {
@@ -106,16 +106,16 @@ export class YouTubePublisher implements PlatformPublisher {
 let youtubeInstance: YouTubePublisher | null = null;
 
 export function getYouTubePublisher(
-  userId?: string,
-  accessToken?: string,
+  clientId?: string,
+  clientSecret?: string,
   refreshToken?: string
 ): YouTubePublisher {
-  if (!youtubeInstance && userId && accessToken && refreshToken) {
-    youtubeInstance = new YouTubePublisher(userId, accessToken, refreshToken);
+  if (!youtubeInstance && clientId && clientSecret && refreshToken) {
+    youtubeInstance = new YouTubePublisher(clientId, clientSecret, refreshToken);
   }
   if (!youtubeInstance) {
     throw new Error(
-      "YouTube publisher not configured. Provide userId, accessToken, and refreshToken."
+      "YouTube publisher not configured. Provide clientId, clientSecret, and refreshToken."
     );
   }
   return youtubeInstance;

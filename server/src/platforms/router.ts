@@ -89,11 +89,11 @@ function selectPublisher(platform: string): PlatformPublisher | null {
       logWarn("Instagram credentials not configured in environment");
       return null;
     case "yt": {
-      const youtubeUserId = process.env.YOUTUBE_USER_ID || "default";
-      const youtubeToken = process.env.YOUTUBE_ACCESS_TOKEN || "";
+      const youtubeClientId = process.env.YOUTUBE_CLIENT_ID || "";
+      const youtubeClientSecret = process.env.YOUTUBE_CLIENT_SECRET || "";
       const youtubeRefreshToken = process.env.YOUTUBE_REFRESH_TOKEN || "";
-      if (youtubeToken && youtubeRefreshToken) {
-        return getYouTubePublisher(youtubeUserId, youtubeToken, youtubeRefreshToken);
+      if (youtubeClientId && youtubeClientSecret && youtubeRefreshToken) {
+        return getYouTubePublisher(youtubeClientId, youtubeClientSecret, youtubeRefreshToken);
       }
       logWarn("YouTube credentials not configured in environment");
       return null;

@@ -11,16 +11,10 @@
 // Access tokens are refreshed automatically when expired.
 
 import { OAuth2Client } from "google-auth-library";
-import dotenv from "dotenv";
-
-dotenv.config({ path: "../.env" });
-
-const CLIENT_ID = process.env.YOUTUBE_CLIENT_ID!;
-const CLIENT_SECRET = process.env.YOUTUBE_CLIENT_SECRET!;
 
 export interface YouTubeConfig {
-  userId: string;
-  accessToken: string;
+  clientId: string;
+  clientSecret: string;
   refreshToken: string;
 }
 
@@ -56,13 +50,11 @@ export class YouTubeApiError extends Error {
 
 export class YouTubeGraphClient {
   private oauth2Client: OAuth2Client;
-  private config: YouTubeConfig;
 
   constructor(config: YouTubeConfig) {
-    this.config = config;
     this.oauth2Client = new OAuth2Client({
-      clientId: config.refreshToken ? CLIENT_ID : CLIENT_ID,
-      clientSecret: CLIENT_SECRET,
+      clientId: config.clientId,
+      clientSecret: config.clientSecret,
       redirectUri: "http://localhost:8080/",
     });
     this.oauth2Client.setCredentials({
