@@ -553,6 +553,8 @@ function AppContent() {
 
   // ── Content type options ──
   const contentTypeOptions = CONTENT_TYPES[modalPlatform] || [];
+  const activeEditPost = editPostId ? posts.find((post) => post.id === editPostId) : undefined;
+  const isPublishedView = activeEditPost?.status === "published";
 
   // ── Render ──
   return (
@@ -598,9 +600,6 @@ function AppContent() {
         </nav>
 
         <div className="toolbar-actions">
-          <button className="btn-secondary" type="button" onClick={() => openReuseScheduler(null)}>
-            Reuse &amp; Schedule
-          </button>
           <button className="btn-import" type="button" onClick={() => { setEditPost(null); setModalPreset(null); setCreateMode("json"); setCreateProcessing(false); setModalOpen(true); }}>
             Bulk Import JSON
           </button>
@@ -737,29 +736,48 @@ function AppContent() {
       {modalOpen && editPostId && (
         <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}>
           <div className="panel">
-            <h3>{editPostId ? "Edit Post" : "Add Post"}</h3>
-            <p className="sub">{editPostId ? "Update the details for your scheduled post." : "Schedule a new post for your content calendar."}</p>
+            <h3>{isPublishedView ? "Published Post" : "Edit Post"}</h3>
+            <p className="sub">{isPublishedView ? "Publication details and performance are read-only." : "Update the details for your scheduled post."}</p>
 
-            <label>Platform</label>
-            <div className="platform-picker">
-              {PLATFORMS.map((p) => (
-                <button key={p} type="button" className={`platform-pick-btn${modalPlatform === p ? " active" : ""}`} onClick={() => { setModalPlatform(p); setModalContentType(""); }}>
-                  <PlatformIcon platform={p} iconOnly /> {platformDataMap[p].name}
-                </button>
-              ))}
-            </div>
+            {isPublishedView && activeEditPost ? (
+              <div className="published-post-details">
+                <div className="detail-item">
+                  <div className="detail-item-head"><span>Publication details</span></div>
+                  <div className="detail-fields">
+                    <div className="detail-field"><b>Platform:</b> <PlatformIcon platform={activeEditPost.platform} iconOnly /> {platformDataMap[activeEditPost.platform].name}</div>
+                    <div className="detail-field"><b>Status:</b> Published</div>
+                    <div className="detail-field"><b>Published:</b> {formatTimestamp(activeEditPost.publishedAt)}</div>
+                    <div className="detail-field"><b>Scheduled:</b> {activeEditPost.date} {activeEditPost.time || ""}</div>
+                    <div className="detail-field"><b>Content type:</b> {escapeHtml(activeEditPost.contentType || "—")}</div>
+                    <div className="detail-field"><b>Platform Post ID:</b> {escapeHtml(activeEditPost.platformPostId || "—")}</div>
+                  </div>
+                  {activeEditPost.socialUrl && <a className="link-cell" href={activeEditPost.socialUrl} target="_blank" rel="noopener noreferrer">Open published post</a>}
+                </div>
+                {(activeEditPost.title || activeEditPost.topic) && <><label>{activeEditPost.title ? "Title" : "Topic"}</label><div className="detail-full-value">{escapeHtml(activeEditPost.title || activeEditPost.topic || "")}</div></>}
+                {(activeEditPost.description || activeEditPost.caption || activeEditPost.content) && <><label>{activeEditPost.description ? "Description" : activeEditPost.caption ? "Caption" : "Content"}</label><div className="detail-full-value">{escapeHtml(activeEditPost.description || activeEditPost.caption || activeEditPost.content || "")}</div></>}
+                {activeEditPost.mediaUrl && <><label>Media</label><a className="link-cell published-media-link" href={activeEditPost.mediaUrl} target="_blank" rel="noopener noreferrer">{escapeHtml(activeEditPost.mediaUrl)}</a></>}
+              </div>
+            ) : <>
+              <label>Platform</label>
+              <div className="platform-picker">
+                {PLATFORMS.map((p) => (
+                  <button key={p} type="button" className={`platform-pick-btn${modalPlatform === p ? " active" : ""}`} onClick={() => { setModalPlatform(p); setModalContentType(""); }}>
+                    <PlatformIcon platform={p} iconOnly /> {platformDataMap[p].name}
+                  </button>
+                ))}
+              </div>
 
-            <label>Date</label>
-            <input type="date" value={modalDate} onChange={(e) => setModalDate(e.target.value)} />
-            <label>Time</label>
-            <input type="time" value={modalTime} onChange={(e) => setModalTime(e.target.value)} />
-            <label>Content Type</label>
-            <select value={modalContentType} onChange={(e) => setModalContentType(e.target.value)}>
-              <option value="">Select type...</option>
-              {contentTypeOptions.map((ct) => <option key={ct} value={ct}>{ct}</option>)}
-            </select>
+              <label>Date</label>
+              <input type="date" value={modalDate} onChange={(e) => setModalDate(e.target.value)} />
+              <label>Time</label>
+              <input type="time" value={modalTime} onChange={(e) => setModalTime(e.target.value)} />
+              <label>Content Type</label>
+              <select value={modalContentType} onChange={(e) => setModalContentType(e.target.value)}>
+                <option value="">Select type...</option>
+                {contentTypeOptions.map((ct) => <option key={ct} value={ct}>{ct}</option>)}
+              </select>
 
-            {modalPlatform === "yt" && (
+              {modalPlatform === "yt" && (
               <>
                 <label>Title</label>
                 <input type="text" value={modalTitle} onChange={(e) => setModalTitle(e.target.value)} placeholder="Video title..." />
@@ -803,6 +821,7 @@ function AppContent() {
               <option value="draft">Draft</option>
               <option value="failed">Failed</option>
             </select>
+            </>}
 
             {/* ── Post Analytics (edit mode only) ── */}
             {editPostId && (
@@ -883,7 +902,7 @@ function AppContent() {
 
             <div className="panel-actions">
               <div className="left">
-                {editPostId && (
+                {editPostId && !isPublishedView && (
                   <>
                     <button type="button" className="btn-danger btn-mini" onClick={() => { deletePostFn(editPostId); }}>Delete</button>
                     <button type="button" className="btn-secondary btn-mini" onClick={() => {
@@ -894,10 +913,8 @@ function AppContent() {
                 )}
               </div>
               <div className="right">
-                <button type="button" className="btn-secondary" onClick={closeModal}>Cancel</button>
-                <button type="button" className="btn-primary" onClick={savePost} disabled={!modalPlatform || !modalDate}>
-                  {editPostId ? "Update" : "Add"} Post
-                </button>
+                <button type="button" className="btn-secondary" onClick={closeModal}>{isPublishedView ? "Close" : "Cancel"}</button>
+                {!isPublishedView && <button type="button" className="btn-primary" onClick={savePost} disabled={!modalPlatform || !modalDate}>Update Post</button>}
               </div>
             </div>
           </div>

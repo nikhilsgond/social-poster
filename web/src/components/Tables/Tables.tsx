@@ -212,14 +212,24 @@ export const Tables: React.FC<TablesProps> = ({
         </td>
       : null;
 
-    const metricCells = METRIC_FIELDS.map((m) => <td key={m.key} className="num">{metricVal(p, m.key)}</td>);
-    const publishedCell = <td className="num">{formatPublishedAt(p.publishedAt)}</td>;
-    const platformPostIdCell = <td className="num" title={p.platformPostId || ""}>{escapeHtml(p.platformPostId || "\u2014")}</td>;
+    const metricCells = METRIC_FIELDS.map((m) => <td key={m.key} className="num table-cell-metric">{metricVal(p, m.key)}</td>);
+    const publishedCell = <td className="num table-cell-published" title={formatPublishedAt(p.publishedAt)}>{formatPublishedAt(p.publishedAt)}</td>;
+    const platformPostIdCell = <td className="num table-cell-long" title={p.platformPostId || ""}>{escapeHtml(p.platformPostId || "\u2014")}</td>;
     const socialUrlCell = (
-      <td>
+      <td className="table-cell-long">
         {p.socialUrl
           ? <a href={p.socialUrl} target="_blank" rel="noopener noreferrer" className="link-cell" title={p.socialUrl}>{escapeHtml(truncate(p.socialUrl, 40))}</a>
           : <span className="dim">\u2014</span>}
+      </td>
+    );
+    const actionsCell = (
+      <td className="table-cell-actions" data-row-control="true">
+        <div className="table-row-actions">
+          {p.status !== "published" && (
+            <button type="button" className="btn-secondary" data-action="edit-post" data-id={p.id} onClick={(e) => { e.stopPropagation(); onEditPost(p); }}>Edit</button>
+          )}
+          <button type="button" className="btn-secondary" onClick={(e) => { e.stopPropagation(); onReusePost(p); }}>Reuse</button>
+        </div>
       </td>
     );
 
@@ -237,20 +247,20 @@ export const Tables: React.FC<TablesProps> = ({
         <tr key={p.id} id={`table-row-${p.id}`} data-post-row={p.id} tabIndex={-1}
             className={`${selected ? "selected-row " : ""}${focusPostId === p.id ? "row-highlight" : ""}`.trim()} onClick={rowOnClick}>
           {checkbox}
-          <td>{<PlatformIcon platform={p.platform} iconOnly />}{escapeHtml(platformDataMap[p.platform].name)}</td>
-          <td className="num">{prettyDateShort(p.date)}</td>
-          <td className="num">{escapeHtml(p.time || "\u2014")}</td>
-          <td><span className={`status-badge ${getStatusClass(p.status)}`}>{getStatusLabel(p.status)}</span></td>
-          <td className="num">{escapeHtml(p.contentType || "\u2014")}</td>
-          <td>
+          <td className="table-cell-platform">{<PlatformIcon platform={p.platform} iconOnly />}{escapeHtml(platformDataMap[p.platform].name)}</td>
+          <td className="num table-cell-date">{prettyDateShort(p.date)}</td>
+          <td className="num table-cell-time">{escapeHtml(p.time || "\u2014")}</td>
+          <td className="table-cell-status"><span className={`status-badge ${getStatusClass(p.status)}`}>{getStatusLabel(p.status)}</span></td>
+          <td className="num table-cell-type">{escapeHtml(p.contentType || "\u2014")}</td>
+          <td className="table-cell-copy">
             <div className="table-cell-preview" title={escapeHtml(getPreview(p) || "")}>{escapeHtml(truncate(getPreview(p), 90))}</div>
           </td>
           {publishedCell}
           {platformPostIdCell}
           {socialUrlCell}
           {metricCells}
-          <td>{relativeTime(p.metricsUpdatedAt)}</td>
-          <td data-row-control="true"><div className="table-row-actions"><button type="button" className="btn-secondary" data-action="edit-post" data-id={p.id} onClick={(e) => { e.stopPropagation(); onEditPost(p); }}>Edit</button><button type="button" className="btn-secondary" onClick={(e) => { e.stopPropagation(); onReusePost(p); }}>Reuse</button></div></td>
+          <td className="table-cell-updated" title={relativeTime(p.metricsUpdatedAt)}>{relativeTime(p.metricsUpdatedAt)}</td>
+          {actionsCell}
         </tr>
       );
     }
@@ -259,7 +269,7 @@ export const Tables: React.FC<TablesProps> = ({
     const fieldCells = platformSchema
       ? platformSchema.map((f) => {
           const val = (p as any)[f.key] || "\u2014";
-          return <td key={f.key}><div className="table-cell-preview" title={escapeHtml(val)}>{escapeHtml(val)}</div></td>;
+          return <td key={f.key} className="table-cell-copy"><div className="table-cell-preview" title={escapeHtml(val)}>{escapeHtml(val)}</div></td>;
         })
       : null;
 
@@ -267,16 +277,16 @@ export const Tables: React.FC<TablesProps> = ({
       <tr key={p.id} id={`table-row-${p.id}`} data-post-row={p.id} tabIndex={-1}
           className={`${selected ? "selected-row " : ""}${focusPostId === p.id ? "row-highlight" : ""}`.trim()} onClick={rowOnClick}>
         {checkbox}
-        <td className="num">{prettyDateShort(p.date)}</td>
-        <td className="num">{escapeHtml(p.time || "\u2014")}</td>
-        <td><span className={`status-badge ${getStatusClass(p.status)}`}>{getStatusLabel(p.status)}</span></td>
+        <td className="num table-cell-date">{prettyDateShort(p.date)}</td>
+        <td className="num table-cell-time">{escapeHtml(p.time || "\u2014")}</td>
+        <td className="table-cell-status"><span className={`status-badge ${getStatusClass(p.status)}`}>{getStatusLabel(p.status)}</span></td>
         {fieldCells}
         {publishedCell}
         {platformPostIdCell}
         {socialUrlCell}
         {metricCells}
-        <td>{relativeTime(p.metricsUpdatedAt)}</td>
-        <td data-row-control="true"><div className="table-row-actions"><button type="button" className="btn-secondary" data-action="edit-post" data-id={p.id} onClick={(e) => { e.stopPropagation(); onEditPost(p); }}>Edit</button><button type="button" className="btn-secondary" onClick={(e) => { e.stopPropagation(); onReusePost(p); }}>Reuse</button></div></td>
+        <td className="table-cell-updated" title={relativeTime(p.metricsUpdatedAt)}>{relativeTime(p.metricsUpdatedAt)}</td>
+        {actionsCell}
       </tr>
     );
   }
@@ -358,17 +368,17 @@ export const Tables: React.FC<TablesProps> = ({
           <thead>
             <tr>
               {selectionMode && <th style={{ width: 38 }} />}
-              {isAllView && <th>Platform</th>}
-              <th>Scheduled Date</th>
-              <th>Time</th>
-              <th>Status</th>
-              {isAllView ? <><th>Content Type</th><th>Preview</th></> : headSchemaFields}
-              <th>Published</th>
-              <th>Platform Post ID</th>
-              <th>Social URL</th>
+              {isAllView && <th className="table-cell-platform">Platform</th>}
+              <th className="table-cell-date">Scheduled Date</th>
+              <th className="table-cell-time">Time</th>
+              <th className="table-cell-status">Status</th>
+              {isAllView ? <><th className="table-cell-type">Content Type</th><th className="table-cell-copy">Preview</th></> : headSchemaFields}
+              <th className="table-cell-published">Published</th>
+              <th className="table-cell-long">Platform Post ID</th>
+              <th className="table-cell-long">Social URL</th>
               {headMetrics}
-              <th>Metrics Updated</th>
-              <th />
+              <th className="table-cell-updated">Metrics Updated</th>
+              <th className="table-cell-actions" />
             </tr>
           </thead>
           <tbody>

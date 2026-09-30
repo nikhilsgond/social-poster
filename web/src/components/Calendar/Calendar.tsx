@@ -100,11 +100,16 @@ export const Calendar: React.FC<CalendarProps> = ({
 
   useEffect(() => {
     const dismissPreview = () => setPreview(null);
+    const dismissPreviewOnOutsideScroll = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest(".cal-preview")) return;
+      dismissPreview();
+    };
     window.addEventListener("resize", dismissPreview);
-    window.addEventListener("scroll", dismissPreview, true);
+    window.addEventListener("scroll", dismissPreviewOnOutsideScroll, true);
     return () => {
       window.removeEventListener("resize", dismissPreview);
-      window.removeEventListener("scroll", dismissPreview, true);
+      window.removeEventListener("scroll", dismissPreviewOnOutsideScroll, true);
     };
   }, []);
 
@@ -142,8 +147,10 @@ export const Calendar: React.FC<CalendarProps> = ({
     const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
     const below = window.innerHeight - rect.bottom;
     const opensBelow = below >= 260;
-    const top = opensBelow ? rect.bottom + 6 : 12;
     const maxHeight = Math.min(360, Math.max(160, opensBelow ? below - 18 : rect.top - 18));
+    const top = opensBelow
+      ? rect.bottom + 6
+      : Math.max(12, rect.top - maxHeight - 6);
     return { left, top, maxHeight };
   };
 
@@ -302,9 +309,7 @@ export const Calendar: React.FC<CalendarProps> = ({
           style={{ left: preview.left, top: preview.top, maxHeight: preview.maxHeight }}
           onClick={(event) => event.stopPropagation()}
           onMouseEnter={cancelPreviewClose}
-          onMouseLeave={() => {
-            if (!preview.pinned) setPreview(null);
-          }}
+          onMouseLeave={() => schedulePreviewClose(preview.key)}
         >
           <div className="cal-preview-header">
             <PlatformIcon platform={preview.platform} />
