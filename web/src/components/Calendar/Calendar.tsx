@@ -1,263 +1,388 @@
-// src/components/Calendar/Calendar.tsx
-import React, { useState, useCallback, useRef, useEffect } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { PlatformIcon, platformDataMap } from "../common/PlatformIcon";
-import { useToast } from "../common/Toast";
-import type { Platform, Post } from "../../types/post";
-import { FIELD_SCHEMA, METRIC_FIELDS, CONTENT_TYPES } from "../../lib/contentTypes";
-import { getStatusLabel, getStatusClass } from "../../types/post";
+import { getStatusClass, getStatusLabel, type Platform, type Post } from "../../types/post";
 
 const PLATFORMS: Platform[] = ["yt", "ig", "fb", "th", "li", "x"];
-const WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 interface CalendarProps {
-  currentMonth: { year: number; month: number };
-  onNavMonth: (delta: number) => void;
-  onGoToday: () => void;
-  onAddPost: (preset?: { date?: string; platform?: Platform }) => void;
-  onView: (view: "tables") => void;
-  onJumpToTable: (postId: string, platform: Platform) => void;
-  onViewPost: (post: Post) => void;
+  year: number;
+  month: number;
   posts: Post[];
-  selectedPosts: Record<string, boolean>;
-  onToggleSelect: (id: string) => void;
-  dragPostId: string | null;
-  onDragStart: (id: string) => void;
-  onDragEnd: () => void;
-  onDrop: (date: string) => void;
+  onAddPost: (defaults?: Partial<Post>) => void;
+  onJumpToTable: (postId: string, platform: Platform) => void;
+  onMovePost?: (postId: string, newDate: string) => void;
 }
 
+interface PreviewState {
+  key: string;
+  platform: Platform;
+  posts: Post[];
+  left: number;
+  top: number;
+  maxHeight: number;
+  pinned: boolean;
+}
+
+const truncate = (value: string, max: number) =>
+  value.length > max ? `${value.slice(0, max).trimEnd()}…` : value;
+
+const postPreview = (post: Post) =>
+  String(post.title || post.topic || post.content || post.caption || "Untitled post");
+
+const timeLabel = (post: Post) => {
+  if (post.status === "published" && post.publishedAt) {
+    const published = new Date(post.publishedAt);
+    if (!Number.isNaN(published.getTime())) {
+      return published.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+  }
+  return post.time || "No time set";
+};
+
+const canShowThumbnail = (post: Post) =>
+  Boolean(post.mediaUrl) && !/(video|reel|short|live)/i.test(post.contentType || "");
+
 export const Calendar: React.FC<CalendarProps> = ({
-  currentMonth, onNavMonth, onGoToday, onAddPost, onView, onJumpToTable, onViewPost,
-  posts, selectedPosts, onToggleSelect, dragPostId, onDragStart, onDragEnd, onDrop,
+  year,
+  month,
+  posts,
+  onAddPost,
+  onJumpToTable,
+  onMovePost,
 }) => {
-  const { showToast } = useToast();
-  const [openGroup, setOpenGroup] = useState<string | null>(null);
-  const [previewPos, setPreviewPos] = useState<{ left: number; top: number } | null>(null);
-  const gridRef = useRef<HTMLDivElement>(null);
+  const hoverCloseTimer = useRef<number | null>(null);
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [preview, setPreview] = useState<PreviewState | null>(null);
 
-  function buildMonthGrid(year: number, month: number): Array<{ date: Date; otherMonth: boolean; num: number }> {
-    const first = new Date(year, month, 1);
-    const startWeekday = (first.getDay() + 6) % 7;
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const cells: Array<{ date: Date; otherMonth: boolean; num: number }> = [];
-    for (let i = 0; i < startWeekday; i++) {
-      const num = daysInMonth - startWeekday + 1 + i;
-      cells.push({ date: new Date(year, month - 1, num), otherMonth: true, num });
-    }
-    for (let d = 1; d <= daysInMonth; d++) {
-      cells.push({ date: new Date(year, month, d), otherMonth: false, num: d });
-    }
-    const trailingDays = (7 - (cells.length % 7)) % 7;
-    for (let t = 1; t <= trailingDays; t++) {
-      cells.push({ date: new Date(year, month + 1, t), otherMonth: true, num: t });
-    }
-    return cells;
-  }
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const daysInMonth = lastDay.getDate();
+  const startDay = (firstDay.getDay() + 6) % 7;
 
-  function formatDate(d: Date): string {
-    const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
-  }
-
-  function prettyDateShort(dateStr: string): string {
-    const parts = dateStr.split("-");
-    const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  }
-
-  function getPreview(post: Post): string {
-    switch (post.platform) {
-      case "yt": return post.title || "";
-      case "ig": return post.caption || post.topic || "";
-      case "fb": return post.content || post.topic || "";
-      default: return post.content || post.topic || "";
-    }
-  }
-
-  function truncate(str: string, n: number): string {
-    if (!str) return "";
-    return str.length > n ? str.slice(0, n - 1) + "\u2026" : str;
-  }
-
-  function escapeHtml(str: string): string {
-    if (!str) return "";
-    // @ts-ignore
-    return (str as string).replace(/[&<>"']/g, (c: string): string => c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c === '"' ? "&quot;" : "&#39;");
-  }
-
-  // ── Status Helpers ──
-  // Status now comes from post.status, not date comparison
-  const cells = buildMonthGrid(currentMonth.year, currentMonth.month);
-  const todayStr = formatDate(new Date());
-  const numRows = cells.length / 7;
-  function toggleGroup(platKey: string) {
-    setOpenGroup((prev) => (prev === platKey ? null : platKey));
-  }
-
-  function positionPreview(groupEl: HTMLElement) {
-    const btn = groupEl.querySelector(".cal-platform-btn") as HTMLElement;
-    const preview = groupEl.querySelector(".cal-preview") as HTMLElement;
-    if (!btn || !preview) return;
-    const r = btn.getBoundingClientRect();
-    const vw = window.innerWidth;
-    const gap = 6;
-    const width = Math.min(270, vw - 28);
-    preview.style.width = width + "px";
-    preview.style.maxWidth = width + "px";
-    preview.style.visibility = "hidden";
-    preview.style.display = "block";
-    const h = Math.min(preview.scrollHeight, 360);
-    let left = Math.max(14, Math.min(r.left, vw - width - 14));
-    let top = r.bottom + gap;
-    if (top + h > window.innerHeight - 14) top = Math.max(14, r.top - h - gap);
-    preview.style.left = Math.round(left) + "px";
-    preview.style.top = Math.round(top) + "px";
-    preview.style.visibility = "";
-    preview.style.display = "";
-  }
-
-  function handleDayClick(dateStr: string, e: React.MouseEvent) {
-    if ((e.target as HTMLElement).closest(".cal-platform-group")) return;
-    onAddPost({ date: dateStr });
-  }
-
-  function handlePlatformClick(platKey: string, dateStr: string, e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    const group = (e.target as HTMLElement).closest(".cal-platform-group") as HTMLElement;
-    if (!group) return;
-    const wasOpen = group.classList.contains("open");
-    document.querySelectorAll(".cal-platform-group.open").forEach((g) => {
-      g.classList.remove("open");
-      const c = g.closest(".cal-cell");
-      if (c) c.classList.remove("cal-cell-open", "cal-cell-preview-open");
+  const postsByDate = useMemo(() => {
+    const grouped = new Map<string, Post[]>();
+    posts.forEach((post) => {
+      if (!post.date) return;
+      const dayPosts = grouped.get(post.date) || [];
+      dayPosts.push(post);
+      grouped.set(post.date, dayPosts);
     });
-    if (!wasOpen) {
-      group.classList.add("open");
-      const cell = group.closest(".cal-cell");
-      if (cell) cell.classList.add("cal-cell-open");
-      positionPreview(group);
+    return grouped;
+  }, [posts]);
+
+  const selectedDayPosts = selectedDay ? postsByDate.get(selectedDay) || [] : [];
+
+  useEffect(() => {
+    const dismissPreview = () => setPreview(null);
+    window.addEventListener("resize", dismissPreview);
+    window.addEventListener("scroll", dismissPreview, true);
+    return () => {
+      window.removeEventListener("resize", dismissPreview);
+      window.removeEventListener("scroll", dismissPreview, true);
+    };
+  }, []);
+
+  useEffect(() => () => {
+    if (hoverCloseTimer.current !== null) window.clearTimeout(hoverCloseTimer.current);
+  }, []);
+
+  const cancelPreviewClose = () => {
+    if (hoverCloseTimer.current === null) return;
+    window.clearTimeout(hoverCloseTimer.current);
+    hoverCloseTimer.current = null;
+  };
+
+  const schedulePreviewClose = (key: string) => {
+    cancelPreviewClose();
+    hoverCloseTimer.current = window.setTimeout(() => {
+      setPreview((current) => current?.key === key && !current.pinned ? null : current);
+      hoverCloseTimer.current = null;
+    }, 120);
+  };
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setPreview(null);
+      setSelectedDay(null);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, []);
+
+  const previewPosition = (element: HTMLElement) => {
+    const rect = element.getBoundingClientRect();
+    const width = Math.min(300, window.innerWidth - 24);
+    const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
+    const below = window.innerHeight - rect.bottom;
+    const opensBelow = below >= 260;
+    const top = opensBelow ? rect.bottom + 6 : 12;
+    const maxHeight = Math.min(360, Math.max(160, opensBelow ? below - 18 : rect.top - 18));
+    return { left, top, maxHeight };
+  };
+
+  const showPreview = (
+    key: string,
+    platform: Platform,
+    platformPosts: Post[],
+    element: HTMLElement,
+    pinned: boolean,
+  ) => {
+    if (!pinned && preview?.pinned) return;
+    const position = previewPosition(element);
+    setPreview({ key, platform, posts: platformPosts, ...position, pinned });
+  };
+
+  const handlePlatformClick = (
+    event: React.MouseEvent<HTMLButtonElement>,
+    key: string,
+    platform: Platform,
+    platformPosts: Post[],
+  ) => {
+    event.stopPropagation();
+    if (preview?.key === key && preview.pinned) {
+      setPreview(null);
+      return;
     }
+    showPreview(key, platform, platformPosts, event.currentTarget, true);
+  };
+
+  const openPostInTable = (post: Post) => {
+    setPreview(null);
+    setSelectedDay(null);
+    onJumpToTable(post.id, post.platform);
+  };
+
+  const cells: React.ReactNode[] = [];
+  for (let index = 0; index < startDay; index += 1) {
+    cells.push(<div key={`empty-start-${index}`} className="cal-cell cal-cell-dim" />);
   }
 
-  function handleDragOver(e: React.DragEvent, cell: HTMLElement) {
-    e.preventDefault();
-    if (!cell.classList.contains("cal-cell-dim")) cell.classList.add("drag-over");
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const dayPosts = postsByDate.get(date) || [];
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const isToday = today === date;
+
+    const openDay = () => {
+      setPreview(null);
+      if (dayPosts.length > 0) setSelectedDay(date);
+      else onAddPost({ date });
+    };
+
+    cells.push(
+      <div
+        key={date}
+        className={`cal-cell${isToday ? " cal-cell-today" : ""}`}
+        role="button"
+        tabIndex={0}
+        aria-label={`${date}, ${dayPosts.length} post${dayPosts.length === 1 ? "" : "s"}`}
+        onClick={openDay}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            openDay();
+          }
+        }}
+        onDragOver={(event) => {
+          if (onMovePost) event.preventDefault();
+        }}
+        onDrop={(event) => {
+          if (!onMovePost) return;
+          event.preventDefault();
+          event.stopPropagation();
+          const postId = event.dataTransfer.getData("text/post-id");
+          if (postId) onMovePost(postId, date);
+        }}
+      >
+        <div className="cal-cell-head"><span className="cal-cell-num">{day}</span></div>
+        <div className="cal-chip-list">
+          {PLATFORMS.map((platform) => {
+            const platformPosts = dayPosts.filter((post) => post.platform === platform);
+            if (!platformPosts.length) return null;
+            const key = `${date}-${platform}`;
+            return (
+              <button
+                type="button"
+                key={platform}
+                className={`cal-platform-btn${preview?.key === key ? " preview-open" : ""}`}
+                onClick={(event) => handlePlatformClick(event, key, platform, platformPosts)}
+                onMouseEnter={(event) =>
+                  (cancelPreviewClose(), showPreview(key, platform, platformPosts, event.currentTarget, false))
+                }
+                onMouseLeave={() => schedulePreviewClose(key)}
+                aria-label={`${platformDataMap[platform].name}, ${platformPosts.length} post${platformPosts.length === 1 ? "" : "s"}`}
+              >
+                <PlatformIcon platform={platform} />
+                <span>{platformDataMap[platform].name}</span>
+                <strong className="platform-count">{platformPosts.length}</strong>
+              </button>
+            );
+          })}
+        </div>
+      </div>,
+    );
   }
 
-  function handleDragLeave(e: React.DragEvent, cell: HTMLElement) {
-    if (cell && e.relatedTarget && !cell.contains(e.relatedTarget as Node)) cell.classList.remove("drag-over");
-  }
-
-  function handleDrop(e: React.DragEvent, cell: HTMLElement) {
-    e.preventDefault();
-    cell.classList.remove("drag-over");
-    const id = (e.dataTransfer && e.dataTransfer.getData("text/plain")) || dragPostId;
-    if (!id) return;
-    const post = posts.find((p) => p.id === id);
-    if (!post || cell.classList.contains("cal-cell-dim")) return;
-    const newDate = cell.getAttribute("data-date");
-    if (!newDate || post.date === newDate) return;
-    onDrop(newDate);
+  while (cells.length % 7 !== 0) {
+    cells.push(<div key={`empty-end-${cells.length}`} className="cal-cell cal-cell-dim" />);
   }
 
   return (
-    <div>
-      {posts.length === 0 && (
-        <div className="hint-bar">Nothing planned yet. Click Add Post, or click any day to add one there.</div>
-      )}
-      <div className="cal-weekdays">
-        {WEEKDAY_NAMES.map((w) => (
-          <div className="cal-weekday" key={w}>{w}</div>
+    <>
+      <div className="cal-weekdays" aria-hidden="true">
+        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((weekday) => (
+          <div className="cal-weekday" key={weekday}>{weekday}</div>
         ))}
       </div>
-      <div className="cal-grid" ref={gridRef} style={{ gridTemplateRows: `repeat(${numRows}, 1fr)` }}>
-        {cells.map((cell, idx) => {
-          const dateStr = formatDate(cell.date);
-          const isToday = dateStr === todayStr;
-          const dayPosts = cell.otherMonth ? [] : posts.filter((p) => p.date === dateStr).sort((a, b) => (a.time || "99:99").localeCompare(b.time || "99:99"));
-          const cellPosts = selectedPosts;
+      <div className="cal-grid">{cells}</div>
 
-          const groups = PLATFORMS.map((plat) => {
-            const platPosts = dayPosts.filter((p) => p.platform === plat);
-            if (!platPosts.length) return null;
-            const isOpen = openGroup === plat;
-            const items = platPosts.map((p) => (
+      {preview && (
+        <div
+          className="cal-preview preview-open"
+          style={{ left: preview.left, top: preview.top, maxHeight: preview.maxHeight }}
+          onClick={(event) => event.stopPropagation()}
+          onMouseEnter={cancelPreviewClose}
+          onMouseLeave={() => {
+            if (!preview.pinned) setPreview(null);
+          }}
+        >
+          <div className="cal-preview-header">
+            <PlatformIcon platform={preview.platform} />
+            <span>{platformDataMap[preview.platform].name}</span>
+            <span className="cal-preview-count">{preview.posts.length}</span>
+            {preview.pinned && (
+              <button type="button" className="cal-preview-close" onClick={() => setPreview(null)}>
+                ×
+              </button>
+            )}
+          </div>
+          <div className="cal-preview-list">
+            {preview.posts.map((post) => (
               <button
-                key={p.id}
                 type="button"
+                key={post.id}
                 className="cal-preview-item"
                 draggable
-                data-drag-post={p.id}
-                data-id={p.id}
-                data-platform={p.platform}
-                data-action="jump-table"
-                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onViewPost(p); }}
-                onDragStart={(e) => {
-                  e.stopPropagation();
-                  onDragStart(p.id);
-                  (e.target as HTMLElement).classList.add("dragging");
-                  if (e.dataTransfer) { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", p.id); }
+                onDragStart={(event) => {
+                  event.dataTransfer.setData("text/post-id", post.id);
+                  event.dataTransfer.effectAllowed = "move";
                 }}
-                onDragEnd={(e) => {
-                  (e.target as HTMLElement).classList.remove("dragging");
-                  if (gridRef.current) gridRef.current.querySelectorAll(".drag-over").forEach((c) => c.classList.remove("drag-over"));
-                  onDragEnd();
+                onClick={() => openPostInTable(post)}
+              >
+                {canShowThumbnail(post) && (
+                  <img
+                    src={post.mediaUrl || undefined}
+                    alt=""
+                    loading="lazy"
+                    onError={(event) => {
+                      event.currentTarget.style.display = "none";
+                    }}
+                  />
+                )}
+                <span className="cal-preview-copy">
+                  <span className="cal-preview-meta">
+                    <span>{post.contentType || "Post"}</span>
+                    <span>{timeLabel(post)}</span>
+                    <span className={`status-badge ${getStatusClass(post.status)}`}>{getStatusLabel(post.status)}</span>
+                  </span>
+                  <span className="cal-preview-text">{truncate(postPreview(post), 110)}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {selectedDay && (
+        <div className="overlay" onMouseDown={() => setSelectedDay(null)}>
+          <section
+            className="panel cal-day-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cal-day-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="cal-day-panel-header">
+              <div>
+                <h3 id="cal-day-title">
+                  {new Date(`${selectedDay}T00:00:00`).toLocaleDateString([], {
+                    weekday: "long",
+                    month: "long",
+                    day: "numeric",
+                    year: "numeric",
+                  })}
+                </h3>
+                <div className="cal-day-panel-subtitle">
+                  {selectedDayPosts.length} post{selectedDayPosts.length === 1 ? "" : "s"}
+                </div>
+              </div>
+              <button type="button" className="cal-preview-close" onClick={() => setSelectedDay(null)}>
+                ×
+              </button>
+            </div>
+            <div className="cal-day-groups">
+              {PLATFORMS.map((platform) => {
+                const platformPosts = selectedDayPosts.filter((post) => post.platform === platform);
+                if (!platformPosts.length) return null;
+                return (
+                  <div className="cal-day-group" key={platform}>
+                    <div className="cal-day-group-title">
+                      <PlatformIcon platform={platform} />
+                      <span>{platformDataMap[platform].name}</span>
+                      <span>{platformPosts.length}</span>
+                    </div>
+                    {platformPosts.map((post) => (
+                      <button
+                        type="button"
+                        className="cal-day-post"
+                        key={post.id}
+                        onClick={() => openPostInTable(post)}
+                      >
+                        {canShowThumbnail(post) && (
+                          <img
+                            src={post.mediaUrl || undefined}
+                            alt=""
+                            loading="lazy"
+                            onError={(event) => {
+                              event.currentTarget.style.display = "none";
+                            }}
+                          />
+                        )}
+                        <span className="cal-day-post-copy">
+                          <span className="cal-preview-meta">
+                            <span>{post.contentType || "Post"}</span>
+                            <span>{timeLabel(post)}</span>
+                            <span className={`status-badge ${getStatusClass(post.status)}`}>{getStatusLabel(post.status)}</span>
+                          </span>
+                          <span>{truncate(postPreview(post), 150)}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="panel-actions">
+              <button type="button" className="btn-secondary" onClick={() => setSelectedDay(null)}>
+                Close
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => {
+                  const date = selectedDay;
+                  setSelectedDay(null);
+                  onAddPost({ date });
                 }}
               >
-                <div className="cal-preview-meta">
-                  <span>{prettyDateShort(p.date)}{p.time ? ` \u00b7 ${p.time}` : ""}</span>
-                  {p.contentType ? <span className="cal-preview-type">{escapeHtml(p.contentType)}</span> : ""}
-                  <span className={`status-badge ${getStatusClass(p.status)}`}>{getStatusLabel(p.status)}</span>
-                </div>
-                <div className="cal-preview-post-title">{escapeHtml(truncate(getPreview(p), 80))}</div>
+                Add post
               </button>
-            )).join("");
-
-            return (
-              <div key={plat} className={`cal-platform-group${isOpen ? " open" : ""}`} data-platform-group={plat}>
-                <button
-                  type="button"
-                  className="cal-platform-btn"
-                  data-action="calendar-platform"
-                  data-platform={plat}
-                  data-date={dateStr}
-                  onClick={(e) => handlePlatformClick(plat, dateStr, e)}
-                >
-                  <PlatformIcon platform={plat} iconOnly />
-                  <span>{platformDataMap[plat].name}</span>
-                  <span className="platform-count">{platPosts.length}</span>
-                </button>
-                <div className="cal-preview">
-                  <div className="cal-preview-title">{platformDataMap[plat].name} · {platPosts.length} post{platPosts.length === 1 ? "" : "s"}</div>
-                  {items}
-                </div>
-              </div>
-            );
-          }).filter(Boolean).join("");
-
-          const classes = `cal-cell${cell.otherMonth ? " cal-cell-dim" : ""}${isToday ? " cal-cell-today" : ""}`;
-          return (
-            <div
-              key={idx}
-              className={classes}
-              tabIndex={0}
-              data-date={dateStr}
-              data-action="day"
-              onClick={(e) => handleDayClick(dateStr, e)}
-              onDragOver={(e) => handleDragOver(e, e.currentTarget as HTMLElement)}
-              onDragLeave={(e) => handleDragLeave(e, e.currentTarget as HTMLElement)}
-              onDrop={(e) => handleDrop(e, e.currentTarget as HTMLElement)}
-            >
-              <div className="cal-cell-head">
-                <span className="cal-cell-num">{cell.num}</span>
-              </div>
-              <div className="cal-chip-list">{groups}</div>
             </div>
-          );
-        })}
-      </div>
-    </div>
+          </section>
+        </div>
+      )}
+    </>
   );
 };

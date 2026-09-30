@@ -8,7 +8,7 @@ import { PostProvider, usePostContext } from "./context/PostContext";
 import { useToast, ToastProvider } from "./components/common/Toast";
 import { PlatformIcon, platformDataMap } from "./components/common/PlatformIcon";
 import { Calendar } from "./components/Calendar/Calendar";
-import { Tables } from "./components/Tables/Tables";
+import { Tables, getFilteredSortedPosts } from "./components/Tables/Tables";
 import { Metrics } from "./components/Metrics/Metrics";
 import { PostModal } from "./components/Post/PostModal";
 import { BulkImportModal } from "./components/BulkImport/BulkImportModal";
@@ -127,6 +127,7 @@ function AppContent() {
     const url = loadUrlState();
     return Number(url.tablePage) || 1;
   });
+  const [focusedTablePostId, setFocusedTablePostId] = useState<string | null>(null);
 
   // ── Selection state ──
   const [selectionMode, setSelectionMode] = useState(false);
@@ -152,9 +153,6 @@ function AppContent() {
   // ── Phase 5 reuse scheduler ──
   const [reuseOpen, setReuseOpen] = useState(false);
   const [reuseSource, setReuseSource] = useState<Post | null>(null);
-
-  // ── Drag state ──
-  const [dragPostId, setDragPostId] = useState<string | null>(null);
 
   // ── Bulk Import State ──
   const [bulkImportOpen, setBulkImportOpen] = useState(false);
@@ -372,8 +370,35 @@ function AppContent() {
 
   // ── Jump to Table from Calendar ──
   const jumpToTable = useCallback((postId: string, platform: Platform) => {
-    setView("tables"); setTableTab(platform);
-  }, []);
+    const target = posts.find((post) => post.id === postId);
+    if (!target) return;
+
+    const targetPlatform = target.platform || platform;
+    const tablePosts = getFilteredSortedPosts(posts, {
+      currentTab: targetPlatform,
+      tableSearch: "",
+      tableContentType: "all",
+      tableStatus: "all",
+      tableSort,
+      tableSortDir,
+    });
+    const postIndex = tablePosts.findIndex((post) => post.id === postId);
+    const targetPage = postIndex >= 0 ? Math.floor(postIndex / tablePageSize) + 1 : 1;
+
+    setTableTab(targetPlatform);
+    setTableSearch("");
+    setTableContentType("all");
+    setTableStatus("all");
+    setTablePage(targetPage);
+    setFocusedTablePostId(postId);
+    setView("tables");
+  }, [posts, tableSort, tableSortDir, tablePageSize]);
+
+  useEffect(() => {
+    if (!focusedTablePostId) return;
+    const timer = window.setTimeout(() => setFocusedTablePostId(null), 2400);
+    return () => window.clearTimeout(timer);
+  }, [focusedTablePostId]);
 
   // ── View Post from Calendar (opens edit modal) ──
   const onViewPost = useCallback((post: Post) => {
@@ -381,15 +406,10 @@ function AppContent() {
   }, [openEditModal]);
 
   // ── Drop on Calendar (drag) ──
-  const handleDrop = useCallback(async (newDate: string) => {
-    if (!dragPostId) return;
-    await movePost(dragPostId, newDate);
+  const handleCalendarMove = useCallback(async (postId: string, newDate: string) => {
+    await movePost(postId, newDate);
     toast("Post moved", `Post moved to ${newDate}.`, "success");
-    setDragPostId(null);
-  }, [dragPostId, movePost, toast]);
-
-  const handleDragStart = useCallback((id: string) => { setDragPostId(id); }, []);
-  const handleDragEnd = useCallback(() => { setDragPostId(null); }, []);
+  }, [movePost, toast]);
 
   // ── Export ──
   const exportJSON = useCallback(() => {
@@ -573,20 +593,12 @@ function AppContent() {
                 <div className="hint-bar">Nothing planned yet. Click Add Post, or click any day to add one there.</div>
               )}
               <Calendar
-                currentMonth={currentMonth}
-                onNavMonth={navMonth}
-                onGoToday={goToday}
+                year={currentMonth.year}
+                month={currentMonth.month}
                 onAddPost={openAddModal}
-                onView={(v) => switchView(v)}
                 onJumpToTable={jumpToTable}
-                onViewPost={onViewPost}
                 posts={posts}
-                selectedPosts={selectedPosts}
-                onToggleSelect={toggleSelect}
-                dragPostId={dragPostId}
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-                onDrop={handleDrop}
+                onMovePost={handleCalendarMove}
               />
             </>
           )}
@@ -624,6 +636,7 @@ function AppContent() {
               pageSize={tablePageSize}
               currentPage={tablePage}
               onPageChange={setTablePage}
+              focusPostId={focusedTablePostId}
             />
           )}
 

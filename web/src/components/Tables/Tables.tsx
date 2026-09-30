@@ -1,5 +1,5 @@
 // src/components/Tables/Tables.tsx
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import { PlatformIcon, platformDataMap, Platform } from "../common/PlatformIcon";
 import { useToast } from "../common/Toast";
 import type { Post } from "../../types/post";
@@ -39,6 +39,16 @@ interface TablesProps {
   pageSize: number;
   currentPage: number;
   onPageChange: (page: number) => void;
+  focusPostId?: string | null;
+}
+
+export interface TablePostQuery {
+  currentTab: Platform | "all";
+  tableSearch: string;
+  tableContentType: string;
+  tableStatus: string;
+  tableSort: string;
+  tableSortDir: string;
 }
 
 function escapeHtml(str: string): string {
@@ -66,6 +76,34 @@ function relativeTime(ts: string | null | undefined): string {
 function metricNumber(post: Post | null, key: string): number {
   const v = post ? Number((post as any)[key]) : 0;
   return Number.isFinite(v) ? v : 0;
+}
+
+export function getFilteredSortedPosts(posts: Post[], query: TablePostQuery): Post[] {
+  const search = query.tableSearch.trim().toLowerCase();
+  return posts.filter((post) => {
+    if (query.currentTab !== "all" && post.platform !== query.currentTab) return false;
+    if (query.tableContentType !== "all" && String(post.contentType || "") !== query.tableContentType) return false;
+    if (query.tableStatus !== "all" && post.status !== query.tableStatus) return false;
+    if (search) {
+      const schema = FIELD_SCHEMA[post.platform] || FIELD_SCHEMA.x;
+      const fields = schema.map((field) => (post as any)[field.key] || "").join(" ");
+      const haystack = `${post.platform} ${post.contentType || ""} ${fields} ${post.title || post.topic || post.content || ""}`.toLowerCase();
+      if (!haystack.includes(search)) return false;
+    }
+    return true;
+  }).sort((a, b) => {
+    const direction = query.tableSortDir === "desc" ? -1 : 1;
+    if (query.tableSort === "views" || query.tableSort === "likes" || query.tableSort === "comments") {
+      return (metricNumber(a, query.tableSort) - metricNumber(b, query.tableSort)) * direction;
+    }
+    if (query.tableSort === "platform") {
+      return platformDataMap[a.platform].name.localeCompare(platformDataMap[b.platform].name) * direction;
+    }
+    if (query.tableSort === "contentType") return (a.contentType || "").localeCompare(b.contentType || "") * direction;
+    if (query.tableSort === "status") return (a.status || "").localeCompare(b.status || "") * direction;
+    if (query.tableSort === "publishedAt") return (a.publishedAt || "").localeCompare(b.publishedAt || "") * direction;
+    return `${a.date || ""} ${a.time || "99:99"}`.localeCompare(`${b.date || ""} ${b.time || "99:99"}`) * direction;
+  });
 }
 
 function prettyDateShort(dateStr: string): string {
@@ -98,41 +136,20 @@ export const Tables: React.FC<TablesProps> = ({
   tableSort, onSortChange, tableSortDir, onSortDirChange,
   selectionMode, onEnterDeleteMode, onExitDeleteMode, onDeleteSelected,
   onExportJSON, onExportCSV, onPrint, onEditPost, onViewPost, onDeletePost, onReusePost, onClearFilters,
-  selectedPosts, onToggleSelect, posts, pageSize, currentPage, onPageChange,
+  selectedPosts, onToggleSelect, posts, pageSize, currentPage, onPageChange, focusPostId,
 }) => {
   const { showToast } = useToast();
   const isAllView = currentTab === "all";
 
   // ── Filter & Sort ──
-  const filteredPosts = useMemo(() => {
-    const search = tableSearch.trim().toLowerCase();
-    const platformFilter = currentTab;
-    const typeFilter = tableContentType;
-    const statusFilter = tableStatus;
-    return posts.filter((p) => {
-      if (platformFilter !== "all" && p.platform !== platformFilter) return false;
-      if (typeFilter !== "all" && String(p.contentType || "") !== typeFilter) return false;
-      if (statusFilter !== "all" && p.status !== statusFilter) return false;
-      if (search) {
-        const schema = FIELD_SCHEMA[p.platform] || FIELD_SCHEMA.x;
-        const fields = schema.map((f) => (p as any)[f.key] || "").join(" ");
-        const hay = (p.platform + " " + (p.contentType || "") + " " + fields + " " + (p.title || p.topic || p.content || "")).toLowerCase();
-        if (hay.indexOf(search) === -1) return false;
-      }
-      return true;
-    }).sort((a, b) => {
-      const dir = tableSortDir === "desc" ? -1 : 1;
-      if (tableSort === "views" || tableSort === "likes" || tableSort === "comments") return (metricNumber(a, tableSort) - metricNumber(b, tableSort)) * dir;
-      if (tableSort === "platform") return platformDataMap[a.platform].name.localeCompare(platformDataMap[b.platform].name) * dir;
-      if (tableSort === "contentType") return (a.contentType || "").localeCompare(b.contentType || "") * dir;
-      if (tableSort === "status") return (a.status || "").localeCompare(b.status || "") * dir;
-      if (tableSort === "publishedAt") {
-        const at = (a.publishedAt || ""), bt = (b.publishedAt || "");
-        return at.localeCompare(bt) * dir;
-      }
-      return ((a.date || "") + " " + (a.time || "99:99")).localeCompare((b.date || "") + " " + (b.time || "99:99")) * dir;
-    });
-  }, [posts, currentTab, tableSearch, tableContentType, tableStatus, tableSort, tableSortDir]);
+  const filteredPosts = useMemo(() => getFilteredSortedPosts(posts, {
+    currentTab,
+    tableSearch,
+    tableContentType,
+    tableStatus,
+    tableSort,
+    tableSortDir,
+  }), [posts, currentTab, tableSearch, tableContentType, tableStatus, tableSort, tableSortDir]);
 
   // ── Pagination (client-side on filtered results) ──
   const totalFiltered = filteredPosts.length;
@@ -140,6 +157,16 @@ export const Tables: React.FC<TablesProps> = ({
   const safePage = Math.min(currentPage, totalPages);
   const startIndex = (safePage - 1) * pageSize;
   const paginatedPosts = filteredPosts.slice(startIndex, startIndex + pageSize);
+
+  useEffect(() => {
+    if (!focusPostId || !paginatedPosts.some((post) => post.id === focusPostId)) return;
+    const frame = window.requestAnimationFrame(() => {
+      const row = document.getElementById(`table-row-${focusPostId}`);
+      row?.scrollIntoView({ behavior: "smooth", block: "center" });
+      row?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusPostId, paginatedPosts]);
 
   const sourceForTypes = isAllView ? posts : posts.filter((p) => p.platform === currentTab);
   const selectedCount = Object.keys(selectedPosts).filter((id) => selectedPosts[id]).length;
@@ -207,8 +234,8 @@ export const Tables: React.FC<TablesProps> = ({
     if (isAllView) {
       // ── All Platforms row ──
       return (
-        <tr key={p.id} id={`table-row-${p.id}`} data-post-row={p.id}
-            className={selected ? "selected-row" : ""} onClick={rowOnClick}>
+        <tr key={p.id} id={`table-row-${p.id}`} data-post-row={p.id} tabIndex={-1}
+            className={`${selected ? "selected-row " : ""}${focusPostId === p.id ? "row-highlight" : ""}`.trim()} onClick={rowOnClick}>
           {checkbox}
           <td>{<PlatformIcon platform={p.platform} iconOnly />}{escapeHtml(platformDataMap[p.platform].name)}</td>
           <td className="num">{prettyDateShort(p.date)}</td>
@@ -237,8 +264,8 @@ export const Tables: React.FC<TablesProps> = ({
       : null;
 
     return (
-      <tr key={p.id} id={`table-row-${p.id}`} data-post-row={p.id}
-          className={selected ? "selected-row" : ""} onClick={rowOnClick}>
+      <tr key={p.id} id={`table-row-${p.id}`} data-post-row={p.id} tabIndex={-1}
+          className={`${selected ? "selected-row " : ""}${focusPostId === p.id ? "row-highlight" : ""}`.trim()} onClick={rowOnClick}>
         {checkbox}
         <td className="num">{prettyDateShort(p.date)}</td>
         <td className="num">{escapeHtml(p.time || "\u2014")}</td>
