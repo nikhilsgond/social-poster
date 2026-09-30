@@ -8,7 +8,6 @@ import type { Platform, Post } from "../../types/post";
 
 const SUPPORTED_PLATFORMS: Platform[] = ["ig", "th", "fb", "yt"];
 const MAX_ITEMS = 10;
-const PRESET_STORAGE_KEY = "social-planner:scheduling-presets:v1";
 
 type ReuseDraft = {
   key: string;
@@ -24,44 +23,14 @@ type ReuseDraft = {
   time: string;
 };
 
-type PresetSlot = { platform: Platform; time: string; dayOffset: number };
-type SchedulingPreset = { id: string; name: string; slots: PresetSlot[]; builtIn?: boolean };
-
 interface ReuseSchedulerModalProps {
   sourcePost: Post | null;
   onClose: () => void;
 }
 
-const BUILT_IN_PRESETS: SchedulingPreset[] = [
-  {
-    id: "same-day-launch",
-    name: "Same-day cross-platform",
-    builtIn: true,
-    slots: SUPPORTED_PLATFORMS.map((platform) => ({ platform, time: "10:00", dayOffset: 0 })),
-  },
-  {
-    id: "staggered-launch",
-    name: "Four-day stagger",
-    builtIn: true,
-    slots: SUPPORTED_PLATFORMS.map((platform, dayOffset) => ({ platform, time: "10:00", dayOffset })),
-  },
-];
-
 function localDate(date = new Date()): string {
   const offset = date.getTimezoneOffset() * 60000;
   return new Date(date.getTime() - offset).toISOString().slice(0, 10);
-}
-
-function addDays(date: string, offset: number): string {
-  const value = new Date(`${date}T12:00:00`);
-  value.setDate(value.getDate() + offset);
-  return localDate(value);
-}
-
-function dayDifference(date: string, baseDate: string): number {
-  const current = new Date(`${date}T12:00:00`).getTime();
-  const base = new Date(`${baseDate}T12:00:00`).getTime();
-  return Math.round((current - base) / 86400000);
 }
 
 function sourceText(source?: Partial<Post> | ReuseDraft | null): string {
@@ -91,15 +60,6 @@ function makeDraft(source?: Partial<Post> | ReuseDraft | null, targetPlatform?: 
   };
 }
 
-function loadPresets(): SchedulingPreset[] {
-  try {
-    const value = JSON.parse(localStorage.getItem(PRESET_STORAGE_KEY) || "[]");
-    return Array.isArray(value) ? value.filter((preset) => preset?.id && preset?.name && Array.isArray(preset?.slots)) : [];
-  } catch {
-    return [];
-  }
-}
-
 function editablePayload(draft: ReuseDraft): Omit<Post, "id" | "createdAt" | "updatedAt"> {
   return {
     platform: draft.platform,
@@ -122,17 +82,12 @@ export const ReuseSchedulerModal: React.FC<ReuseSchedulerModalProps> = ({ source
   const { showToast } = useToast();
   const [drafts, setDrafts] = useState<ReuseDraft[]>([makeDraft(sourcePost)]);
   const [step, setStep] = useState<"edit" | "preview">("edit");
-  const [activeTool, setActiveTool] = useState<"manual" | "json" | "presets">("manual");
+  const [activeTool, setActiveTool] = useState<"manual" | "json">("manual");
   const [jsonText, setJsonText] = useState("");
   const [jsonErrors, setJsonErrors] = useState<string[]>([]);
   const [jsonWarnings, setJsonWarnings] = useState<string[]>([]);
-  const [presets, setPresets] = useState<SchedulingPreset[]>(loadPresets);
-  const [presetName, setPresetName] = useState("");
-  const [presetBaseDate, setPresetBaseDate] = useState(localDate());
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
-
-  const template = drafts[0] || makeDraft(sourcePost);
 
   const updateDraft = useCallback((key: string, changes: Partial<ReuseDraft>) => {
     setDrafts((items) => items.map((item) => item.key === key ? { ...item, ...changes } : item));
@@ -221,39 +176,6 @@ export const ReuseSchedulerModal: React.FC<ReuseSchedulerModalProps> = ({ source
     showToast("JSON loaded", `${result.items.length} post${result.items.length === 1 ? "" : "s"} loaded for editing.`, "success");
   }, [jsonText, showToast]);
 
-  const savePreset = useCallback(() => {
-    const name = presetName.trim();
-    if (!name || !drafts.length) return;
-    const baseDate = drafts[0].date;
-    const preset: SchedulingPreset = {
-      id: `preset_${Date.now()}`,
-      name,
-      slots: drafts.map((draft) => ({ platform: draft.platform, time: draft.time, dayOffset: dayDifference(draft.date, baseDate) })),
-    };
-    const next = [...presets, preset];
-    setPresets(next);
-    localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(next));
-    setPresetName("");
-    showToast("Preset saved", `${name} is available for future schedules.`, "success");
-  }, [drafts, presetName, presets, showToast]);
-
-  const applyPreset = useCallback((preset: SchedulingPreset) => {
-    const source = sourcePost || template;
-    setDrafts(preset.slots.slice(0, MAX_ITEMS).map((slot) => {
-      const draft = makeDraft(source, slot.platform, addDays(presetBaseDate, slot.dayOffset));
-      return { ...draft, time: slot.time || "10:00" };
-    }));
-    setActiveTool("manual");
-    setStep("edit");
-    setValidationErrors([]);
-  }, [presetBaseDate, sourcePost, template]);
-
-  const deletePreset = useCallback((id: string) => {
-    const next = presets.filter((preset) => preset.id !== id);
-    setPresets(next);
-    localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(next));
-  }, [presets]);
-
   const previewRows = useMemo(() => drafts.map((draft, index) => ({
     ...draft,
     index: index + 1,
@@ -273,7 +195,6 @@ export const ReuseSchedulerModal: React.FC<ReuseSchedulerModalProps> = ({ source
             <div className="reuse-tabs">
               <button type="button" className={activeTool === "manual" ? "active" : ""} onClick={() => setActiveTool("manual")}>Manual</button>
               <button type="button" className={activeTool === "json" ? "active" : ""} onClick={() => setActiveTool("json")}>JSON</button>
-              <button type="button" className={activeTool === "presets" ? "active" : ""} onClick={() => setActiveTool("presets")}>Presets</button>
             </div>
 
             {activeTool === "json" && (
@@ -283,27 +204,6 @@ export const ReuseSchedulerModal: React.FC<ReuseSchedulerModalProps> = ({ source
                 <button type="button" className="btn-secondary" onClick={loadJson} disabled={!jsonText.trim()}>Validate &amp; load for editing</button>
                 {!!jsonErrors.length && <div className="bulk-errors">{jsonErrors.map((error, index) => <div className="error" key={index}>{error}</div>)}</div>}
                 {!!jsonWarnings.length && <div className="bulk-errors reuse-warnings">{jsonWarnings.map((warning, index) => <div className="error" key={index}>{warning}</div>)}</div>}
-              </div>
-            )}
-
-            {activeTool === "presets" && (
-              <div className="reuse-tool">
-                <label>Schedule starts</label>
-                <input type="date" value={presetBaseDate} onChange={(event) => setPresetBaseDate(event.target.value)} />
-                <div className="preset-list">
-                  {[...BUILT_IN_PRESETS, ...presets].map((preset) => (
-                    <div className="preset-row" key={preset.id}>
-                      <div><strong>{preset.name}</strong><span>{preset.slots.length} post{preset.slots.length === 1 ? "" : "s"}</span></div>
-                      <button type="button" className="btn-secondary btn-mini" onClick={() => applyPreset(preset)}>Apply</button>
-                      {!preset.builtIn && <button type="button" className="btn-danger btn-mini" onClick={() => deletePreset(preset.id)}>Delete</button>}
-                    </div>
-                  ))}
-                </div>
-                <label>Save current schedule as a preset</label>
-                <div className="preset-save">
-                  <input type="text" value={presetName} onChange={(event) => setPresetName(event.target.value)} placeholder="Preset name" />
-                  <button type="button" className="btn-secondary" onClick={savePreset} disabled={!presetName.trim()}>Save preset</button>
-                </div>
               </div>
             )}
 

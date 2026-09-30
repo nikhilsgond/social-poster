@@ -11,6 +11,7 @@ import { Calendar } from "./components/Calendar/Calendar";
 import { Tables, getFilteredSortedPosts } from "./components/Tables/Tables";
 import { Metrics } from "./components/Metrics/Metrics";
 import { CreatePostWorkflow } from "./components/CreatePost/CreatePostWorkflow";
+import { StrategyWorkflow } from "./components/CreatePost/StrategyWorkflow";
 import { BulkImportModal } from "./components/BulkImport/BulkImportModal";
 import { ReuseSchedulerModal } from "./components/ReuseScheduler/ReuseSchedulerModal";
 import { CONTENT_TYPES, isPublishingPlatform } from "./lib/contentTypes";
@@ -146,7 +147,7 @@ function AppContent() {
   const [modalMediaUrl, setModalMediaUrl] = useState("");
   const [modalStatus, setModalStatus] = useState<PostStatus>("scheduled");
   const [createProcessing, setCreateProcessing] = useState(false);
-  const [createMode, setCreateMode] = useState<"single" | "json">("single");
+  const [createMode, setCreateMode] = useState<"single" | "json" | "strategy">("single");
 
   // ── Modal analytics toggle ──
   const [showAnalytics, setShowAnalytics] = useState(false);
@@ -608,6 +609,15 @@ function AppContent() {
       )}
       {modalOpen && !editPostId && createMode === "json" && (
         <BulkImportModal
+          posts={posts}
+          onCreate={addPostDetailed}
+          onClose={closeModal}
+          onModeChange={setCreateMode}
+          onProcessingChange={setCreateProcessing}
+        />
+      )}
+      {modalOpen && !editPostId && createMode === "strategy" && (
+        <StrategyWorkflow
           posts={posts}
           onCreate={addPostDetailed}
           onClose={closeModal}
