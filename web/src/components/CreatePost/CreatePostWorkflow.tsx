@@ -14,6 +14,7 @@ import {
   destinationToPost,
   findDuplicateConflicts,
   normalizeSourceIdentity,
+  sanitizeProcessError,
   validateDestination,
   validateRemoteMediaUrl,
   type CreateMediaSource,
@@ -26,6 +27,7 @@ import {
   uploadMediaFile,
   validateMediaFile,
 } from "../../lib/cloudinary";
+import { CreateWorkflowTabs, type CreateWorkflowMode } from "./CreateWorkflowTabs";
 
 interface CreatePostWorkflowProps {
   posts: Post[];
@@ -34,6 +36,7 @@ interface CreatePostWorkflowProps {
   onCreate: (post: NewPost) => Promise<AddPostDetailedResult>;
   onClose: () => void;
   onProcessingChange?: (processing: boolean) => void;
+  onModeChange?: (mode: CreateWorkflowMode) => void;
 }
 
 type Step = "content" | "platforms" | "details" | "review" | "results";
@@ -55,14 +58,6 @@ const todayLocal = () => {
 const previewText = (destination: DestinationDraft) =>
   destination.title || destination.caption || destination.content || destination.description || "No text";
 
-const safeError = (value: unknown) => {
-  const text = value instanceof Error ? value.message : String(value || "Unknown error");
-  return text
-    .replace(/(access_token=)[^&\s]+/gi, "$1[redacted]")
-    .replace(/Bearer\s+[^\s]+/gi, "Bearer [redacted]")
-    .slice(0, 500);
-};
-
 export const CreatePostWorkflow: React.FC<CreatePostWorkflowProps> = ({
   posts,
   initialDate,
@@ -70,6 +65,7 @@ export const CreatePostWorkflow: React.FC<CreatePostWorkflowProps> = ({
   onCreate,
   onClose,
   onProcessingChange,
+  onModeChange,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [step, setStep] = useState<Step>("content");
@@ -130,7 +126,7 @@ export const CreatePostWorkflow: React.FC<CreatePostWorkflowProps> = ({
       setMedia(null);
       setMediaPreview(null);
       URL.revokeObjectURL(localPreview);
-      setContentError(safeError(error));
+      setContentError(sanitizeProcessError(error));
     } finally {
       setUploading(false);
     }
@@ -146,7 +142,7 @@ export const CreatePostWorkflow: React.FC<CreatePostWorkflowProps> = ({
     } catch (error) {
       setMedia(null);
       setMediaPreview(null);
-      setContentError(safeError(error));
+      setContentError(sanitizeProcessError(error));
     } finally {
       setValidatingUrl(false);
     }
@@ -231,7 +227,7 @@ export const CreatePostWorkflow: React.FC<CreatePostWorkflowProps> = ({
                 state: "failed",
                 message: "Planner record created; native submission failed",
                 postId: outcome.post.id,
-                error: safeError(outcome.error),
+                error: sanitizeProcessError(outcome.error),
               }
             : result));
           continue;
@@ -247,7 +243,7 @@ export const CreatePostWorkflow: React.FC<CreatePostWorkflowProps> = ({
           : result));
       } catch (error) {
         setResults((current) => current.map((result) => result.destinationKey === destination.key
-          ? { ...result, state: "failed", message: "Creation failed", error: safeError(error) }
+          ? { ...result, state: "failed", message: "Creation failed", error: sanitizeProcessError(error) }
           : result));
       }
     }
@@ -280,6 +276,8 @@ export const CreatePostWorkflow: React.FC<CreatePostWorkflowProps> = ({
           <div><h3 id="create-title">Create Post</h3><p className="sub">Create one or more independent destination posts.</p></div>
           <button type="button" className="cal-preview-close" onClick={onClose} disabled={processing}>×</button>
         </header>
+
+        <CreateWorkflowTabs active="single" onChange={(mode) => onModeChange?.(mode)} disabled={processing} />
 
         <ol className="create-steps" aria-label="Create Post progress">
           {STEPS.map((item, index) => (

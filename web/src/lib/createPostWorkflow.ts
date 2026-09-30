@@ -53,6 +53,11 @@ export interface DuplicateConflict {
   message: string;
 }
 
+export interface DuplicateCandidate {
+  destination: DestinationDraft;
+  mediaUrl?: string | null;
+}
+
 export interface DestinationProcessResult {
   destinationKey: string;
   state: "queued" | "processing" | "success" | "failed";
@@ -188,19 +193,39 @@ export function findDuplicateConflicts(
   media: CreateMediaSource | null,
   existingPosts: Post[],
 ): DuplicateConflict[] {
+  return findDuplicateConflictsForCandidates(
+    destinations.map((destination) => ({ destination, mediaUrl: media?.url })),
+    existingPosts,
+  );
+}
+
+export function findDuplicateConflictsForCandidates(
+  candidates: DuplicateCandidate[],
+  existingPosts: Post[],
+): DuplicateConflict[] {
   const conflicts: DuplicateConflict[] = [];
   const seen = new Map<string, string>();
+  const operationConflictKeys = new Set<string>();
 
-  destinations.forEach((destination) => {
-    const identity = duplicateIdentity(destination, media?.url);
+  candidates.forEach(({ destination, mediaUrl }) => {
+    const identity = duplicateIdentity(destination, mediaUrl);
     if (!identity) return;
     const first = seen.get(identity);
     if (first) {
+      if (!operationConflictKeys.has(first)) {
+        conflicts.push({
+          destinationKey: first,
+          source: "current operation",
+          message: `Duplicates ${destination.key} in this Create Post operation.`,
+        });
+        operationConflictKeys.add(first);
+      }
       conflicts.push({
         destinationKey: destination.key,
         source: "current operation",
         message: `Duplicates ${first} in this Create Post operation.`,
       });
+      operationConflictKeys.add(destination.key);
     } else {
       seen.set(identity, destination.key);
     }
@@ -215,8 +240,8 @@ export function findDuplicateConflicts(
       if (identity) existingIdentities.set(identity, post);
     });
 
-  destinations.forEach((destination) => {
-    const identity = duplicateIdentity(destination, media?.url);
+  candidates.forEach(({ destination, mediaUrl }) => {
+    const identity = duplicateIdentity(destination, mediaUrl);
     const existing = identity ? existingIdentities.get(identity) : undefined;
     if (!existing) return;
     conflicts.push({
@@ -272,7 +297,10 @@ function probeElement(url: string, type: CreateMediaType): Promise<CreateMediaTy
   });
 }
 
-export async function validateRemoteMediaUrl(value: string): Promise<CreateMediaSource> {
+export async function validateRemoteMediaUrl(
+  value: string,
+  options: { allowMediaProbe?: boolean } = { allowMediaProbe: true },
+): Promise<CreateMediaSource> {
   let url: URL;
   try {
     url = new URL(value.trim());
@@ -301,10 +329,23 @@ export async function validateRemoteMediaUrl(value: string): Promise<CreateMedia
     // Many public CDNs block browser HEAD/CORS. Fall through to media probing.
   }
 
+  if (options.allowMediaProbe === false) {
+    throw new Error("Remote media metadata could not be verified. The host must expose an image/video Content-Type to browser HEAD requests.");
+  }
+
   try {
     const type = await Promise.any([probeElement(url.toString(), "image"), probeElement(url.toString(), "video")]);
     return { url: url.toString(), type, identity: normalizeSourceIdentity(url.toString()), origin: "url", bytes };
   } catch {
     throw new Error("The URL could not be verified as an accessible image or video.");
   }
+}
+
+export function sanitizeProcessError(value: unknown): string {
+  const message = value instanceof Error ? value.message : String(value || "Unknown error");
+  return message
+    .replace(/(access_token=)[^&\s]+/gi, "$1[redacted]")
+    .replace(/Bearer\s+[^\s]+/gi, "Bearer [redacted]")
+    .replace(/((?:authorization|api[_-]?key|owner[_-]?key|service[_-]?role[_-]?key)\s*[:=]\s*)[^,;\s]+/gi, "$1[redacted]")
+    .slice(0, 500);
 }

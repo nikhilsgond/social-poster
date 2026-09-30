@@ -1,386 +1,220 @@
-// src/components/BulkImport/BulkImportModal.tsx
-import React, { useState, useRef, useCallback, useEffect } from "react";
-import type { Platform, Post } from "../../types/post";
-import { FIELD_SCHEMA } from "../../lib/contentTypes";
-import { PlatformIcon } from "../common/PlatformIcon";
-import { useToast } from "../common/Toast";
-import { usePostContext } from "../../context/PostContext";
-import { validatePost } from "../../lib/validation";
-
-interface BulkState {
-  platform: Platform;
-  fileName: string;
-  data: { items: Record<string, unknown>[]; errors: string[]; warnings: string[] } | null;
-  errors: string[];
-  warnings: string[];
-  progress: number;
-  phase: string;
-}
+import React, { useRef, useState } from "react";
+import type { AddPostDetailedResult, NewPost } from "../../context/PostContext";
+import type { Post } from "../../types/post";
+import {
+  BULK_JSON_TEMPLATE,
+  MAX_BULK_JSON_POSTS,
+  validateBulkJson,
+  type BulkJsonPreviewRow,
+  type BulkJsonValidationResult,
+} from "../../lib/bulkJsonWorkflow";
+import {
+  destinationActionLabel,
+  destinationToPost,
+  sanitizeProcessError,
+  type DestinationProcessResult,
+} from "../../lib/createPostWorkflow";
+import { platformDataMap } from "../common/PlatformIcon";
+import { CreateWorkflowTabs, type CreateWorkflowMode } from "../CreatePost/CreateWorkflowTabs";
 
 interface BulkImportModalProps {
+  posts: Post[];
+  onCreate: (post: NewPost) => Promise<AddPostDetailedResult>;
   onClose: () => void;
-  onImportComplete: () => void;
+  onModeChange: (mode: CreateWorkflowMode) => void;
+  onProcessingChange?: (processing: boolean) => void;
 }
 
-function isValidDateString(value: unknown): boolean {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const p = value.split("-").map(Number);
-  const d = new Date(p[0], p[1] - 1, p[2]);
-  return d.getFullYear() === p[0] && d.getMonth() === p[1] - 1 && d.getDate() === p[2];
-}
+type Phase = "input" | "preview" | "results";
 
-const validateBulkJson = (raw: string, platformKey: Platform, existingPosts: Post[]) => {
-  const result: { items: Record<string, unknown>[]; errors: string[]; warnings: string[] } = {
-    items: [],
-    errors: [],
-    warnings: [],
-  };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (e) {
-    result.errors.push("Invalid JSON: " + (e instanceof Error ? e.message : "Could not parse the file."));
-    return result;
-  }
-  if (!Array.isArray(parsed)) {
-    result.errors.push("The JSON root must be an array of posts.");
-    return result;
-  }
-  if (parsed.length === 0) {
-    result.errors.push("The JSON file contains no posts.");
-    return result;
-  }
+const rowText = (row: BulkJsonPreviewRow) =>
+  row.values.title || row.values.caption || row.values.content || row.values.description || "—";
 
-  const schema = FIELD_SCHEMA[platformKey] || FIELD_SCHEMA.x;
-  const seen: Record<string, number> = {};
+const mediaLabel = (row: BulkJsonPreviewRow) => {
+  if (!row.mediaUrl) return "None";
+  if (row.media) return `${row.media.type === "image" ? "Image" : "Video"} URL`;
+  return "Unverified URL";
+};
 
-  (parsed as Record<string, unknown>[]).forEach(function (item, idx) {
-    const n = idx + 1;
-    if (!item || typeof item !== "object" || Array.isArray(item)) {
-      result.errors.push("Row " + n + ": each item must be an object.");
-      return;
-    }
-    if (!item.date) result.errors.push("Row " + n + ": date is required.");
-    else if (!isValidDateString(item.date)) result.errors.push("Row " + n + ": date must be a real date in YYYY-MM-DD format.");
-    if (!((item as any).platform as string)) result.errors.push("Row " + n + ": platform is required.");
-    else if ((item as any).platform as string !== platformKey) result.errors.push("Row " + n + ": platform must match the selected platform (" + platformKey + ").");
-    if (item.time !== undefined && item.time !== "") {
-      if (typeof item.time !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(item.time as string))
-        result.errors.push("Row " + n + ": time must use HH:MM (24-hour) format.");
-    }
-    schema.forEach(function (f) {
-      if (f.key === "contentType" && ((item as any)[f.key] === undefined || String((item as any)[f.key]).trim() === "")) {
-        result.errors.push("Row " + n + ": contentType is required.");
-      }
-      if (f.type === "select" && (item as any)[f.key] !== undefined && f.options!.indexOf((item as any)[f.key] as string) === -1) {
-        result.errors.push("Row " + n + ": " + f.key + " must be one of " + f.options!.join(", ") + ".");
-      }
-      if ((item as any)[f.key] !== undefined && typeof (item as any)[f.key] !== "string") result.errors.push("Row " + n + ": " + f.key + " must be text.");
-    });
-    const hasContent = schema.some(function (f) { return (item as any)[f.key] !== undefined && String((item as any)[f.key]).trim() !== ""; });
-    if (!hasContent) result.errors.push("Row " + n + ": at least one platform content field is required.");
-    if ((item as any).metrics !== undefined) {
-      if (!(item as any).metrics || typeof (item as any).metrics !== "object" || Array.isArray((item as any).metrics))
-        result.errors.push("Row " + n + ": metrics must be an object.");
-      else
-        ["views", "likes", "comments"].forEach(function (m) {
-          if ((item as any).metrics[m as string] !== undefined && (item as any).metrics[m as string] !== null && ((item as any).metrics[m as string] === "" || !Number.isFinite(Number((item as any).metrics[m as string])) || Number((item as any).metrics[m as string]) < 0))
-            result.errors.push("Row " + n + ": " + m + " must be a non-negative number.");
-        });
-    }
-    const sourceId = String((item as any).sourceId || (item as any).id || "").trim();
-    const permalink = String((item as any).permalink || (item as any).permalink_url || "").trim();
-    const duplicateKey = sourceId ? "sourceId|" + sourceId : permalink ? "permalink|" + permalink : "content|" + String(item.date || "") + "|" + platformKey + "|" + schema.map(function (f) { return String((item as any)[f.key] || "").trim(); }).join("|");
-    if (seen[duplicateKey]) result.errors.push("Row " + n + ": duplicate of row " + seen[duplicateKey] + ".");
-    else seen[duplicateKey] = n;
-  });
-
-  // Existing-record duplicates are warnings, not hard errors
-  result.items = (parsed as Record<string, unknown>[]).map(function (item, idx) {
-    const schema = FIELD_SCHEMA[platformKey] || FIELD_SCHEMA.x;
-    const payload: Record<string, unknown> = {
-      platform: platformKey,
-      date: item.date,
-      time: item.time || "",
-    };
-    schema.forEach(function (f) { payload[f.key] = (item as any)[f.key] === undefined ? "" : String((item as any)[f.key]); });
-    const sourceId = String((item as any).sourceId || "").trim();
-    const permalink = String((item as any).permalink || "").trim();
-    if (sourceId) payload.sourceId = sourceId;
-    if (permalink) payload.permalink = permalink;
-    payload.metrics = {};
-    ["views", "likes", "comments"].forEach(function (m) {
-      (payload.metrics as Record<string, any>)[m] = (item as any).metrics && (item as any).metrics[m as string] !== undefined && (item as any).metrics[m as string] !== null && (item as any).metrics[m as string] !== "" ? Number((item as any).metrics[m as string]) : null;
-    });
-    payload.metricsUpdatedAt = null;
-    return payload;
-  });
-
-  result.items.forEach(function (item, idx) {
-    const incomingSourceId = String((item as any).sourceId || "").trim();
-    const incomingPermalink = String((item as any).permalink || "").trim();
-    const exists = existingPosts.some(function (p) {
-      if (incomingSourceId && String(p.sourceId || "").trim() === incomingSourceId) return true;
-      if (incomingPermalink && String(p.permalink || "").trim() === incomingPermalink) return true;
-      if (p.platform !== (item as any).platform as string || p.date !== item.date) return false;
-      return schema.every(function (f) { return String((p as any)[f.key] || "").trim() === String((item as any)[f.key] || "").trim(); });
-    });
-    if (exists) result.warnings.push("Row " + (idx + 1) + ": an identical post already exists and will be skipped.");
-  });
-
-  if (result.errors.length) result.items = [];
-  return result;
-}
-
-function bulkTemplate(platformKey: Platform): string {
-  const schema = FIELD_SCHEMA[platformKey] || FIELD_SCHEMA.x;
-  const example: Record<string, unknown> = {
-    platform: platformKey,
-    date: "2026-10-01",
-    time: "10:00",
-  };
-  schema.forEach(function (f) {
-    example[f.key] = f.type === "select" ? f.options![0] : "Example content";
-  });
-  example.metrics = { views: 0, likes: 0, comments: 0 };
-  return JSON.stringify([example], null, 2);
-}
-
-export const BulkImportModal: React.FC<BulkImportModalProps> = ({ onClose, onImportComplete }) => {
-  const { showToast } = useToast();
-  const { posts, bulkAddPosts } = usePostContext();
+export const BulkImportModal: React.FC<BulkImportModalProps> = ({
+  posts,
+  onCreate,
+  onClose,
+  onModeChange,
+  onProcessingChange,
+}) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [state, setState] = useState<BulkState>({
-    platform: "yt",
-    fileName: "",
-    data: null,
-    errors: [],
-    warnings: [],
-    progress: 0,
-    phase: "",
-  });
+  const [jsonText, setJsonText] = useState(BULK_JSON_TEMPLATE);
+  const [phase, setPhase] = useState<Phase>("input");
+  const [validation, setValidation] = useState<BulkJsonValidationResult | null>(null);
+  const [validating, setValidating] = useState(false);
+  const [processing, setProcessing] = useState(false);
+  const [results, setResults] = useState<DestinationProcessResult[]>([]);
 
-  // Close on Escape
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  const updateJson = (value: string) => {
+    if (processing) return;
+    setJsonText(value);
+    setValidation(null);
+    setPhase("input");
+    setResults([]);
+  };
 
-  const handlePlatformPick = useCallback((key: Platform) => {
-    setState((prev) => ({ ...prev, platform: key, fileName: "", data: null, errors: [], warnings: [], progress: 0, phase: "" }));
-  }, []);
-
-  const handleFileDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files[0];
-    if (file) readBulkFile(file);
-  }, []);
-
-  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) readBulkFile(file);
-  }, []);
-
-  const readBulkFile = useCallback((file: File) => {
-    setState((prev) => ({ ...prev, fileName: file.name, data: null, progress: 0, phase: "Reading file…" }));
-    showToast("Reading JSON", "Opening " + file.name + "…", "info", 2200);
-
+  const readJsonFile = (file?: File) => {
+    if (!file || processing) return;
     const reader = new FileReader();
-    reader.onprogress = function (e) {
-      if (e.lengthComputable) {
-        const pct = Math.round((e.loaded / e.total) * 80);
-        setState((prev) => ({ ...prev, progress: pct, phase: "Reading file…" }));
-      }
-    };
-    reader.onload = function (e) {
-      setState((prev) => ({ ...prev, progress: 85, phase: "Validating JSON…" }));
-      setTimeout(function () {
-        try {
-          const result = validateBulkJson(String(e.target?.result || ""), state.platform, posts);
-          setState((prev) => ({
-            ...prev,
-            data: result,
-            progress: 100,
-            phase: result.errors.length ? "Validation failed" : "Validation complete",
-          }));
-          if (result.errors.length) {
-            showToast("Validation failed", result.errors.length + " error" + (result.errors.length === 1 ? "" : "s") + " found. Nothing was imported.", "error", 6000);
-          } else {
-            showToast("JSON validated", result.items.length + " post" + (result.items.length === 1 ? "" : "s") + " ready to import.", "success", 3200);
-          }
-        } catch (err) {
-          setState((prev) => ({
-            ...prev,
-            data: { items: [], errors: ["Unexpected validation error: " + (err instanceof Error ? err.message : String(err))], warnings: [] },
-            progress: 100,
-            phase: "Validation failed",
-          }));
-          showToast("Import error", "The JSON could not be validated. Nothing was imported.", "error", 6000);
-        }
-      }, 30);
-    };
-    reader.onerror = function () {
-      setState((prev) => ({
-        ...prev,
-        data: { items: [], errors: ["Could not read the selected file. Check that the file is accessible and is a valid JSON file."], warnings: [] },
-        progress: 100,
-        phase: "File read failed",
-      }));
-      showToast("File read failed", "The JSON file could not be read. Nothing was imported.", "error", 6000);
-    };
-    reader.onabort = function () {
-      setState((prev) => ({ ...prev, data: { items: [], errors: ["File reading was cancelled."], warnings: [] }, progress: 0, phase: "Cancelled" }));
-      showToast("Import cancelled", "No posts were imported.", "warning", 3000);
-    };
+    reader.onload = () => updateJson(String(reader.result || ""));
     reader.readAsText(file);
-  }, [state.platform, showToast, posts]);
+  };
 
-  const handleConfirm = useCallback(() => {
-    if (!state.data || state.data.errors.length || !state.data.items.length) return;
-    let added = 0;
-    let skipped = 0;
+  const validate = async () => {
+    if (!jsonText.trim() || validating || processing) return;
+    setValidating(true);
+    setResults([]);
+    try {
+      const result = await validateBulkJson(jsonText, posts);
+      setValidation(result);
+      setPhase("preview");
+    } finally {
+      setValidating(false);
+    }
+  };
 
-    state.data.items.forEach(function (item) {
-      const incomingSourceId = String((item as any).sourceId || "").trim();
-      const incomingPermalink = String((item as any).permalink || "").trim();
-      const exists = posts.some(function (p) {
-        if (incomingSourceId && String(p.sourceId || "").trim() === incomingSourceId) return true;
-        if (incomingPermalink && String(p.permalink || "").trim() === incomingPermalink) return true;
-        if (p.platform !== (item as any).platform as string || p.date !== item.date) return false;
-        const schema = FIELD_SCHEMA[(item as any).platform as string as Platform] || FIELD_SCHEMA.x;
-        return schema.every(function (f) { return String((p as any)[f.key] || "").trim() === String((item as any)[f.key] || "").trim(); });
-      });
-      if (exists) { skipped++; return; }
-      const platformKey = (item as any).platform as string as Platform;
-      const schema = FIELD_SCHEMA[platformKey] || FIELD_SCHEMA.x;
-      const post: Record<string, unknown> = { platform: platformKey, date: item.date, time: item.time || "" };
-      schema.forEach(function (f) { post[f.key] = (item as any)[f.key] || ""; });
-      if (incomingSourceId) post.sourceId = incomingSourceId;
-      if (incomingPermalink) post.permalink = incomingPermalink;
-      post.metrics = {};
-      ["views", "likes", "comments"].forEach(function (m) { (post.metrics as Record<string, any>)[m] = (item as any).metrics && (item as any).metrics[m as string] !== undefined && (item as any).metrics[m as string] !== null && (item as any).metrics[m as string] !== "" ? Number((item as any).metrics[m as string]) : null; });
-      post.metricsUpdatedAt = null;
-    });
+  const processRows = async () => {
+    if (!validation?.valid || processing) return;
+    const processable = validation.rows.filter(
+      (row): row is BulkJsonPreviewRow & { destination: NonNullable<BulkJsonPreviewRow["destination"]> } => Boolean(row.destination),
+    );
+    setProcessing(true);
+    onProcessingChange?.(true);
+    setPhase("results");
+    setResults(processable.map((row) => ({ destinationKey: row.destination.key, state: "queued", message: "Pending" })));
 
-    // All valid items go through bulkAddPosts
-    const validItems: Post[] = state.data.items.map(function (item) {
-      const platformKey = (item as any).platform as string as Platform;
-      const schema = FIELD_SCHEMA[platformKey] || FIELD_SCHEMA.x;
-      const post: Record<string, unknown> = { platform: platformKey, date: item.date, time: item.time || "" };
-      schema.forEach(function (f) { post[f.key] = (item as any)[f.key] || ""; });
-      const sourceId = String((item as any).sourceId || "").trim();
-      const permalink = String((item as any).permalink || "").trim();
-      if (sourceId) post.sourceId = sourceId;
-      if (permalink) post.permalink = permalink;
-      post.metrics = {};
-      ["views", "likes", "comments"].forEach(function (m) { (post.metrics as Record<string, any>)[m] = (item as any).metrics && (item as any).metrics[m as string] !== undefined && (item as any).metrics[m as string] !== null && (item as any).metrics[m as string] !== "" ? Number((item as any).metrics[m as string]) : null; });
-      post.metricsUpdatedAt = null;
-      return post as Post;
-    }).filter(function (item) {
-      const incomingSourceId = String((item as any).sourceId || "").trim();
-      const incomingPermalink = String((item as any).permalink || "").trim();
-      return !posts.some(function (p) {
-        if (incomingSourceId && String(p.sourceId || "").trim() === incomingSourceId) return true;
-        if (incomingPermalink && String(p.permalink || "").trim() === incomingPermalink) return true;
-        if (p.platform !== (item as any).platform as string || p.date !== item.date) return false;
-        const schema = FIELD_SCHEMA[(item as any).platform as string as Platform] || FIELD_SCHEMA.x;
-        return schema.every(function (f) { return String((p as any)[f.key] || "").trim() === String((item as any)[f.key] || "").trim(); });
-      });
-    });
-
-    if (validItems.length) {
-      bulkAddPosts(validItems);
+    for (const row of processable) {
+      const key = row.destination.key;
+      setResults((current) => current.map((result) => result.destinationKey === key
+        ? { ...result, state: "processing", message: "Creating planner record…" }
+        : result));
+      try {
+        const post = destinationToPost(row.destination, row.media);
+        const outcome = await onCreate(post);
+        if (outcome.nativeAttempted && !outcome.nativeSucceeded) {
+          setResults((current) => current.map((result) => result.destinationKey === key
+            ? { ...result, state: "failed", message: "Planner record created; native submission failed", postId: outcome.post.id, error: sanitizeProcessError(outcome.error) }
+            : result));
+        } else {
+          const action = row.action ? destinationActionLabel(row.action) : "Planner record created";
+          setResults((current) => current.map((result) => result.destinationKey === key
+            ? { ...result, state: "success", message: action, postId: outcome.post.id }
+            : result));
+        }
+      } catch (error) {
+        setResults((current) => current.map((result) => result.destinationKey === key
+          ? { ...result, state: "failed", message: "Creation failed", error: sanitizeProcessError(error) }
+          : result));
+      }
     }
 
-    const imported = validItems.length;
-    const dupSkipped = state.data.items.length - validItems.length;
-    onImportComplete();
-    showToast("Import complete", imported + " post" + (imported === 1 ? "" : "s") + " added" + (dupSkipped ? " · " + dupSkipped + " duplicate(s) skipped" : "") + ".", "success", 4200);
-  }, [state.data, onImportComplete, showToast, posts, bulkAddPosts]);
+    setProcessing(false);
+    onProcessingChange?.(false);
+  };
 
-  const disabled = !(state.data && !state.data.errors.length && state.data.items.length);
-  const plat = state.platform;
-  const platformButtons = (["yt", "ig", "fb", "th", "li", "x"] as Platform[]).map(function (p) {
-    return (
-      <button
-        key={p}
-        type="button"
-        className={"platform-pick-btn" + (state.platform === p ? " active" : "")}
-        onClick={() => handlePlatformPick(p)}
-      >
-        <PlatformIcon platform={p} iconOnly /> {p.toUpperCase()}
-      </button>
-    );
-  });
-
-  let statusContent: React.ReactNode = null;
-  if (state.fileName && !state.data) {
-    const pct = Math.max(0, Math.min(100, state.progress));
-    statusContent = (
-      <div className="bulk-progress">
-        <div className="bulk-progress-head">
-          <span>{state.phase || "Reading file…"}</span>
-          <span id="bulkProgressPct">{pct}%</span>
-        </div>
-        <div className="bulk-progress-track">
-          <div className="bulk-progress-bar" style={{ width: pct + "%" }} />
-        </div>
-        <div className="bulk-progress-meta">The file is read locally. Nothing is saved until validation succeeds.</div>
-      </div>
-    );
-  }
-  if (state.data) {
-    if (state.data.errors.length) {
-      statusContent = <div className="bulk-errors">{state.data.errors.map(function (x, i) { return <div key={i} className="error">{x}</div>; })}</div>;
-    } else {
-      statusContent = <div className="bulk-ok"><strong>{state.data.items.length} posts ready to import.</strong> No validation errors found.</div>;
-      if (state.data.warnings.length) statusContent = <><div className="bulk-ok"><strong>{state.data.items.length} posts ready to import.</strong> No validation errors found.</div><div className="bulk-errors" style={{ marginTop: 8 }}>{state.data.warnings.map(function (x, i) { return <div key={i} className="error">{x}</div>; })}</div></>;
-    }
-    statusContent = (
-      <>
-        <div className="bulk-summary">
-          <span className="bulk-stat"><strong>{state.data.items.length}</strong> valid</span>
-          <span className="bulk-stat"><strong>{state.data.errors.length}</strong> errors</span>
-          <span className="bulk-stat"><strong>{state.data.warnings.length}</strong> warnings</span>
-        </div>
-        {statusContent}
-      </>
-    );
-  }
+  const successful = results.filter((result) => result.state === "success").length;
+  const failed = results.filter((result) => result.state === "failed").length;
 
   return (
-    <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="panel" role="dialog" aria-modal="true">
-        <h3>Bulk Import JSON</h3>
-        <div className="sub">Import multiple {plat.toUpperCase()} posts at once. Nothing is saved until validation passes.</div>
+    <div className="overlay" onMouseDown={(event) => {
+      if (event.target === event.currentTarget && !processing) onClose();
+    }}>
+      <section className="panel create-workflow bulk-json-workflow" role="dialog" aria-modal="true" aria-labelledby="bulk-json-title">
+        <header className="create-header">
+          <div><h3 id="bulk-json-title">Create Post</h3><p className="sub">Validate and schedule up to {MAX_BULK_JSON_POSTS} independent posts from JSON.</p></div>
+          <button type="button" className="cal-preview-close" onClick={onClose} disabled={processing}>×</button>
+        </header>
 
-        <label>Platform</label>
-        <div className="platform-picker">{platformButtons}</div>
+        <CreateWorkflowTabs active="json" onChange={onModeChange} disabled={processing || validating} />
 
-        <label>JSON file</label>
-        <label className="file-drop" onDrop={handleFileDrop} onDragOver={(e) => e.preventDefault()}>
-          <input ref={fileInputRef} id="bulkFileInput" type="file" accept="application/json,.json" onChange={handleFileChange} style={{ display: "none" }} />
-          <strong>Choose JSON file</strong>
-          <span>{state.fileName || "Expected: an array of post objects"}</span>
-        </label>
+        <div className="create-body bulk-json-body">
+          {phase === "input" && (
+            <div>
+              <h4>JSON input</h4>
+              <p className="create-help">Use schemaVersion 1 and public media URLs. JSON media entries do not upload local files.</p>
+              <div className="bulk-json-input-tools">
+                <button type="button" className="btn-secondary btn-mini" onClick={() => fileInputRef.current?.click()}>Load .json file</button>
+                <button type="button" className="btn-secondary btn-mini" onClick={() => updateJson(BULK_JSON_TEMPLATE)}>Reset example</button>
+                <input ref={fileInputRef} type="file" accept=".json,application/json" hidden onChange={(event) => readJsonFile(event.target.files?.[0])} />
+              </div>
+              <textarea className="json-code bulk-json-editor" value={jsonText} onChange={(event) => updateJson(event.target.value)} spellCheck={false} aria-label="Bulk scheduling JSON" />
+              <details className="bulk-json-schema-help">
+                <summary>Schema fields</summary>
+                <p>Root: <code>schemaVersion</code>, <code>posts</code>. Post: <code>platform</code>, <code>contentType</code>, optional <code>mediaUrl</code>, relevant text fields, <code>date</code>, and <code>time</code>. Unknown fields are rejected.</p>
+              </details>
+            </div>
+          )}
 
-        {statusContent}
+          {phase === "preview" && validation && (
+            <div>
+              <h4>Validation preview</h4>
+              <p className="create-help">No planner records have been created. Correct every blocking error before confirmation.</p>
+              {validation.rootErrors.length > 0 && <div className="create-errors">{validation.rootErrors.map((error) => <div key={error}>{error}</div>)}</div>}
+              <div className="bulk-preview-scroll">
+                <table className="preview-table bulk-preview-table">
+                  <thead><tr><th>Row</th><th>Platform</th><th>Type</th><th>Media</th><th>Title / content</th><th>Date</th><th>Time</th><th>Action</th><th>Status</th></tr></thead>
+                  <tbody>
+                    {validation.rows.map((row) => (
+                      <tr key={row.row} className={row.errors.length ? "bulk-row-invalid" : "bulk-row-valid"}>
+                        <td className="num">{row.row}</td>
+                        <td>{row.destination ? platformDataMap[row.destination.platform].name : row.values.platform || "—"}</td>
+                        <td>{row.destination?.contentType || row.values.contentType || "—"}</td>
+                        <td>{mediaLabel(row)}</td>
+                        <td><span className="bulk-preview-text" title={rowText(row)}>{rowText(row)}</span></td>
+                        <td>{row.values.date || "—"}</td>
+                        <td>{row.values.time || "—"}</td>
+                        <td>{row.action ? destinationActionLabel(row.action) : "—"}</td>
+                        <td>
+                          <strong className={row.errors.length ? "bulk-status-error" : "bulk-status-ready"}>{row.errors.length ? "Error" : "Ready"}</strong>
+                          {row.errors.map((error) => <small className="bulk-row-message" key={error}>{error}</small>)}
+                          {row.warnings.map((warning) => <small className="bulk-row-warning" key={warning}>{warning}</small>)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
-        <label>Expected format</label>
-        <div className="json-code">{bulkTemplate(state.platform)}</div>
+          {phase === "results" && validation && (
+            <div>
+              <h4>{processing ? "Processing posts" : "Bulk scheduling results"}</h4>
+              <p className="create-help">Each entry is processed independently. A failed entry does not roll back successful entries.</p>
+              <div className="result-summary"><span>Successful: <strong>{successful}</strong></span><span>Failed: <strong>{failed}</strong></span></div>
+              <div className="create-results">
+                {validation.rows.map((row) => {
+                  const result = results.find((item) => item.destinationKey === row.destination?.key);
+                  return (
+                    <div key={row.row} className={`create-result ${result?.state || "queued"}`}>
+                      <span className="result-state">{result?.state === "success" ? "✓" : result?.state === "failed" ? "!" : result?.state === "processing" ? "…" : "·"}</span>
+                      <div><strong>Row {row.row} · {row.destination ? platformDataMap[row.destination.platform].name : row.values.platform}</strong><span>{row.destination?.contentType || row.values.contentType}</span><small>{result?.message || "Pending"}</small>{result?.error && <small>{result.error}</small>}</div>
+                      <strong>{result?.state === "queued" ? "Pending" : result?.state === "processing" ? "Processing" : result?.state === "success" ? "Success" : "Failed"}</strong>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
 
-        <div className="panel-actions">
-          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+        <div className="panel-actions create-actions">
+          <div className="left">{phase === "preview" && <button type="button" className="btn-secondary" onClick={() => setPhase("input")}>Edit JSON</button>}</div>
           <div className="right">
-            <button type="button" className="btn-primary" disabled={disabled} onClick={handleConfirm} style={disabled ? { opacity: 0.45, cursor: "not-allowed" } : undefined}>
-              Import {state.data && !state.data.errors.length ? state.data.items.length : 0} Posts
-            </button>
+            {phase === "input" && <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>}
+            {phase === "input" && <button type="button" className="btn-primary" onClick={validate} disabled={!jsonText.trim() || validating}>{validating ? "Validating media…" : "Validate & Preview"}</button>}
+            {phase === "preview" && <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>}
+            {phase === "preview" && <button type="button" className="btn-primary" onClick={processRows} disabled={!validation?.valid}>Confirm & Process</button>}
+            {phase === "results" && !processing && <button type="button" className="btn-primary" onClick={onClose}>Done</button>}
           </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 };

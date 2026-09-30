@@ -230,6 +230,10 @@ table.data-table td.link-cell:hover { color: var(--text); }
 .create-workflow { max-width: 860px; padding: 0; overflow: hidden; display: flex; flex-direction: column; }
 .create-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 22px 10px; }
 .create-header .sub { margin: 3px 0 0; }
+.create-workflow-tabs { display: flex; gap: 6px; padding: 0 22px 14px; }
+.create-workflow-tabs button { border: 1px solid var(--border); border-radius: 8px; background: var(--panel-alt); color: var(--muted); padding: 7px 13px; font: inherit; font-size: .72rem; font-weight: 700; cursor: pointer; }
+.create-workflow-tabs button.active { background: var(--text); border-color: var(--text); color: var(--bg); }
+.create-workflow-tabs button:disabled:not(.active) { cursor: not-allowed; opacity: .45; }
 .create-steps { list-style: none; display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; margin: 0; padding: 0 22px 14px; }
 .create-steps li { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font-size: .66rem; font-weight: 700; white-space: nowrap; }
 .create-steps li::after { content: ""; height: 1px; background: var(--border); flex: 1; }
@@ -295,6 +299,7 @@ ul.create-errors { padding-left: 28px; }
   .destination-schedule { grid-template-columns: 1fr; }
   .create-body { padding: 14px; }
   .create-header, .create-actions { padding-left: 14px; padding-right: 14px; }
+  .create-workflow-tabs { padding-left: 14px; padding-right: 14px; }
 }
 
 .detail-item { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 10px; }
@@ -468,6 +473,26 @@ ul.create-errors { padding-left: 28px; }
 .preview-table { width: 100%; border-collapse: collapse; font-size: .72rem; }
 .preview-table th { background: var(--panel-alt); text-align: left; padding: 8px 10px; font-weight: 700; color: var(--muted); font-size: .63rem; text-transform: uppercase; border-bottom: 1px solid var(--border); }
 .preview-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.bulk-json-workflow { max-width: min(1120px, calc(100vw - 32px)); }
+.bulk-json-body { min-height: 390px; }
+.bulk-json-input-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.bulk-json-editor { display: block; width: 100%; min-height: 330px; resize: vertical; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-alt); color: var(--text); font: .74rem/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; tab-size: 2; }
+.bulk-json-schema-help { margin-top: 10px; color: var(--muted); font-size: .72rem; }
+.bulk-json-schema-help summary { cursor: pointer; color: var(--text); font-weight: 700; }
+.bulk-json-schema-help p { margin: 7px 0 0; line-height: 1.5; }
+.bulk-preview-scroll { max-width: 100%; max-height: 430px; overflow: auto; margin-top: 12px; border: 1px solid var(--border); border-radius: 9px; }
+.bulk-preview-table { min-width: 1040px; }
+.bulk-preview-table th { position: sticky; top: 0; z-index: 1; }
+.bulk-preview-table td:nth-child(5) { max-width: 180px; }
+.bulk-preview-table td:nth-child(8) { max-width: 190px; }
+.bulk-preview-table td:last-child { min-width: 210px; max-width: 290px; }
+.bulk-row-invalid { background: rgba(127,29,29,.08); }
+.bulk-preview-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bulk-status-error, .bulk-status-ready { display: block; font-size: .68rem; margin-bottom: 3px; }
+.bulk-status-error, .bulk-row-message { color: #fca5a5; }
+.bulk-status-ready { color: #86efac; }
+.bulk-row-message, .bulk-row-warning { display: block; margin-top: 3px; font-size: .65rem; line-height: 1.35; overflow-wrap: anywhere; }
+.bulk-row-warning { color: #fbbf24; }
 .preview-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .json-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .7rem; line-height: 1.55; background: var(--panel-alt); border: 1px solid var(--border); border-radius: 8px; padding: 10px; white-space: pre-wrap; overflow: auto; }
 .file-drop { border: 1px dashed var(--border); border-radius: 9px; padding: 18px; text-align: center; background: var(--panel-alt); cursor: pointer; }
