@@ -5,6 +5,23 @@ export { generatePostId } from "./data";
 export type {} from "./data";
 export { validatePost, parseImportedPosts, normalizePost, generateId } from "./validation";
 export type { ValidationResult, BulkValidationResult } from "./validation";
+export {
+  CONTENT_TYPES,
+  FIELD_SCHEMA,
+  METRIC_FIELDS,
+  PUBLISHING_PLATFORM_CAPABILITIES,
+  getContentTypeCapability,
+  isPublishingPlatform,
+  supportedContentTypeNames,
+  validatePlatformPostCapability,
+} from "./contentTypes";
+export type {
+  ContentTypeCapability,
+  FieldSupport,
+  PlatformCapability,
+  PublishingPlatform,
+  RequiredMediaType,
+} from "./contentTypes";
 export { metricSummary, formatMetric, escapeHtml, prettyDateShort, relativeTime, metricNumber, platformStats, contentTypeChartData, viewsTrendData, weekdayChartData, engagementByType, topPosts, platformPerformance, performanceAnalysis, DATE_RANGE_OPTIONS, filterPostsByDateRange, snapshotSummary, latestSnapshotsByPost, snapshotTrendData, snapshotPlatformStats, enrichPostsWithSnapshots, latestSnapshot, formatTimestamp } from "./metrics";
 export {
   uploadToCloudinary,

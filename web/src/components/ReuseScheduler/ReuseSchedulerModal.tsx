@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { CONTENT_TYPES, FIELD_SCHEMA } from "../../lib/contentTypes";
+import { CONTENT_TYPES, FIELD_SCHEMA, getContentTypeCapability, isPublishingPlatform } from "../../lib/contentTypes";
 import { buildScheduledAt, parseImportedPosts, validatePost } from "../../lib/validation";
 import { usePostContext } from "../../context/PostContext";
 import { useToast } from "../common/Toast";
@@ -77,8 +77,8 @@ function makeDraft(source?: Partial<Post> | ReuseDraft | null, targetPlatform?: 
   return {
     key: crypto.randomUUID(),
     platform,
-    contentType: samePlatform && source?.contentType
-      ? source.contentType
+    contentType: samePlatform && source?.contentType && isPublishingPlatform(platform)
+      ? getContentTypeCapability(platform, source.contentType)?.name || source.contentType
       : CONTENT_TYPES[platform][0],
     title: platform === "yt" ? (source?.title || source?.topic || text.slice(0, 100)) : (samePlatform ? source?.title || "" : ""),
     topic: platform === "ig" || platform === "fb" || platform === "th" ? (source?.topic || source?.title || "") : "",

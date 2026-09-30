@@ -1,14 +1,35 @@
 // src/lib/contentTypes.ts
 import type { Platform } from "../types/post";
+import {
+  PLATFORM_CAPABILITIES,
+  supportedContentTypeNames,
+} from "../../../server/src/platform-capabilities";
+
+export {
+  PLATFORM_CAPABILITIES,
+  getContentTypeCapability,
+  isPublishingPlatform,
+  supportedContentTypeNames,
+  validatePlatformPostCapability,
+} from "../../../server/src/platform-capabilities";
+export type {
+  ContentTypeCapability,
+  FieldSupport,
+  PlatformCapability,
+  PublishingPlatform,
+  RequiredMediaType,
+} from "../../../server/src/platform-capabilities";
 
 export const CONTENT_TYPES: Record<Platform, string[]> = {
-  yt: ["Video", "Short", "Live", "Community Post", "Other"],
-  ig: ["Reel", "Post", "Carousel", "Story", "Live", "Other"],
-  fb: ["Reel", "Video", "Image", "Text", "Story", "Link", "Other"],
-  th: ["Text", "Image", "Video", "GIF", "Link", "Other"],
+  yt: supportedContentTypeNames("yt"),
+  ig: supportedContentTypeNames("ig"),
+  fb: supportedContentTypeNames("fb"),
+  th: supportedContentTypeNames("th"),
   li: ["Text", "Image", "Video", "Document", "Article", "Poll", "Event", "Other"],
   x: ["Text", "Image", "Video", "GIF", "Link", "Thread", "Other"],
 };
+
+export const PUBLISHING_PLATFORM_CAPABILITIES = PLATFORM_CAPABILITIES;
 
 export const FIELD_SCHEMA: Record<Platform, { key: string; label: string; type: "text" | "textarea" | "select"; options?: string[] }[]> = {
   yt: [

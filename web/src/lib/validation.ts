@@ -3,7 +3,12 @@
 // Creates a clear boundary between external/imported data and the internal Post model.
 
 import type { Platform, Post, PostStatus } from "../types/post";
-import { FIELD_SCHEMA, CONTENT_TYPES } from "./contentTypes";
+import {
+  FIELD_SCHEMA,
+  CONTENT_TYPES,
+  isPublishingPlatform,
+  validatePlatformPostCapability,
+} from "./contentTypes";
 
 export interface ValidationResult {
   valid: boolean;
@@ -63,6 +68,17 @@ export function validatePost(input: any, platform?: Platform): ValidationResult 
     return { valid: false, post: null, errors: ["Item must be an object."], warnings: [] };
   }
 
+  input = { ...input };
+  const publishingPlatform = isPublishingPlatform(String(input.platform || ""));
+  if (publishingPlatform) {
+    const capabilityValidation = validatePlatformPostCapability(input);
+    errors.push(...capabilityValidation.errors);
+    warnings.push(...capabilityValidation.warnings);
+    if (capabilityValidation.canonicalContentType) {
+      input.contentType = capabilityValidation.canonicalContentType;
+    }
+  }
+
   // Required fields
   if (!input.platform) errors.push("platform is required.");
   else if (!CONTENT_TYPES[input.platform as Platform]) errors.push(`Invalid platform "${input.platform}".`);
@@ -75,10 +91,10 @@ export function validatePost(input: any, platform?: Platform): ValidationResult 
   if (plat && FIELD_SCHEMA[plat]) {
     const schema = FIELD_SCHEMA[plat];
     schema.forEach((f) => {
-      if (f.key === "contentType" && (!input.contentType || String(input.contentType).trim() === "")) {
+      if (!publishingPlatform && f.key === "contentType" && (!input.contentType || String(input.contentType).trim() === "")) {
         errors.push("contentType is required.");
       }
-      if (f.type === "select" && input[f.key] !== undefined && f.options && !f.options.includes(String(input[f.key]))) {
+      if (f.type === "select" && input[f.key] !== undefined && f.options && !f.options.includes(String(input[f.key])) && !(publishingPlatform && f.key === "contentType")) {
         errors.push(`${f.key} must be one of ${f.options.join(", ")}`);
       }
       if (f.type !== "select" && input[f.key] !== undefined && typeof input[f.key] !== "string") {

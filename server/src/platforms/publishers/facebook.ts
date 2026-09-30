@@ -8,6 +8,7 @@ import type { Post } from "../../types";
 import type { PlatformPublisher, PublishResult } from "./interface";
 import { FacebookGraphClient, toUnixTimestamp } from "../../lib/facebook";
 import { logInfo, logError } from "../../lib/logger";
+import { getContentTypeCapability, validatePlatformPostCapability } from "../../platform-capabilities";
 
 export class FacebookPublisher implements PlatformPublisher {
   private client: FacebookGraphClient;
@@ -19,11 +20,13 @@ export class FacebookPublisher implements PlatformPublisher {
   async publish(post: Post): Promise<PublishResult> {
     logInfo(`Facebook publish received`, { postId: post.id, platform: post.platform });
 
-    // Validate required fields
-    if (!post.content && !post.mediaUrl) {
-      logError("Facebook publish failed: no content or media URL");
-      return { success: false, error: "No content or media URL provided" };
+    const validation = validatePlatformPostCapability(post);
+    if (validation.errors.length > 0) {
+      const error = validation.errors.join(" ");
+      logError("Facebook publish validation failed", { postId: post.id, error });
+      return { success: false, error };
     }
+    const contentType = getContentTypeCapability("fb", validation.canonicalContentType)!;
 
     const scheduledAt = post.scheduledAt;
     const isScheduled = scheduledAt && new Date(scheduledAt) > new Date();
@@ -39,10 +42,10 @@ export class FacebookPublisher implements PlatformPublisher {
     try {
       let result: PublishResult;
 
-      if (post.mediaUrl) {
+      if (contentType.mediaType === "image") {
         // Image post
         result = await this.client.publishImage(
-          post.mediaUrl,
+          post.mediaUrl!,
           post.caption || post.content || undefined,
           scheduledPublishTime
         );

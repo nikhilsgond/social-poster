@@ -17,6 +17,7 @@ import type { Post } from "../../types";
 import type { PlatformPublisher, PublishResult } from "./interface";
 import { YouTubeGraphClient } from "../../lib/youtube";
 import { logInfo, logError } from "../../lib/logger";
+import { getContentTypeCapability, validatePlatformPostCapability } from "../../platform-capabilities";
 
 // ── YouTube media_type mapping ──
 // Social Planner uses internal content types (e.g. "Image", "Video", "Carousel").
@@ -25,15 +26,9 @@ import { logInfo, logError } from "../../lib/logger";
 // Other types are rejected locally before calling the API.
 
 function mapToYouTubeContentType(contentType: string | undefined): string {
-  const upper = (contentType || "").toUpperCase();
-  switch (upper) {
-    case "VIDEO":
-      return "video";
-    default:
-      throw new Error(
-        `Unsupported YouTube content type: ${contentType || "(empty)"}`
-      );
-  }
+  const capability = getContentTypeCapability("yt", contentType);
+  if (!capability) throw new Error(`Unsupported YouTube content type: ${contentType || "(empty)"}`);
+  return capability.backendType;
 }
 
 export class YouTubePublisher implements PlatformPublisher {
@@ -46,10 +41,11 @@ export class YouTubePublisher implements PlatformPublisher {
   async publish(post: Post): Promise<PublishResult> {
     logInfo(`YouTube publish received`, { postId: post.id, platform: post.platform });
 
-    // Validate required fields
-    if (!post.mediaUrl) {
-      logError("YouTube publish failed: no media URL");
-      return { success: false, error: "No media URL provided" };
+    const validation = validatePlatformPostCapability(post);
+    if (validation.errors.length > 0) {
+      const error = validation.errors.join(" ");
+      logError("YouTube publish validation failed", { postId: post.id, error });
+      return { success: false, error };
     }
 
     const scheduledAt = post.scheduledAt;
@@ -57,7 +53,7 @@ export class YouTubePublisher implements PlatformPublisher {
     try {
       // Map content type
       const youTubeContentType = mapToYouTubeContentType(post.contentType);
-      const title = post.title || "API Test";
+      const title = post.title!;
       const description = post.description || post.content || "";
 
       // Step 1: Upload video to YouTube
@@ -70,7 +66,7 @@ export class YouTubePublisher implements PlatformPublisher {
       });
 
       const uploadResult = await this.client.uploadVideo(
-        post.mediaUrl,
+        post.mediaUrl!,
         title,
         description,
         scheduledAt

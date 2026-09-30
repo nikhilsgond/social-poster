@@ -1,6 +1,7 @@
 // server/src/platforms/publishers/threads.ts
 // Real Threads publisher.
-// Uses the Threads Graph API client to publish text, image, and video posts.
+// Uses the Threads Graph API client to publish text posts. Although the API
+// supports media, this repository's client does not yet send media URL params.
 // The Threads client (src/lib/threads.ts) is completely isolated from the
 // Facebook and Instagram clients — separate host, endpoints, tokens, and errors.
 // Respects the existing scheduled_at scheduling semantics.
@@ -9,29 +10,17 @@
 import type { Post } from "../../types";
 import type { PlatformPublisher, PublishResult } from "./interface";
 import { ThreadsGraphClient } from "../../lib/threads";
-import { logInfo, logWarn, logError } from "../../lib/logger";
+import { logInfo, logError } from "../../lib/logger";
+import { getContentTypeCapability, validatePlatformPostCapability } from "../../platform-capabilities";
 
 // ── Threads media_type mapping ──
-// Social Planner uses internal content types (e.g. "Other", "Text", "Image").
-// Threads API requires: TEXT, IMAGE, VIDEO.
-// This mapping validates and converts the planner type to the Threads API type.
-// Unknown types like "Other" default to TEXT for text-only Threads publishing.
+// The capability map intentionally exposes only TEXT until media URL parameters
+// are implemented. Unsupported values are rejected rather than converted.
 
 function mapToThreadsMediaType(contentType: string | undefined): string {
-  const upper = (contentType || "").toUpperCase();
-  switch (upper) {
-    case "TEXT":
-    case "IMAGE":
-    case "VIDEO":
-      return upper;
-    case "OTHER":
-    case "":
-      logWarn(`Threads: unknown contentType "${contentType}" — defaulting to media_type=TEXT`);
-      return "TEXT";
-    default:
-      logWarn(`Threads: unsupported contentType "${contentType}" — defaulting to media_type=TEXT`);
-      return "TEXT";
-  }
+  const capability = getContentTypeCapability("th", contentType);
+  if (!capability) throw new Error(`Unsupported Threads content type: ${contentType || "(empty)"}`);
+  return capability.backendType;
 }
 
 export class ThreadsPublisher implements PlatformPublisher {
@@ -44,10 +33,11 @@ export class ThreadsPublisher implements PlatformPublisher {
   async publish(post: Post): Promise<PublishResult> {
     logInfo(`Threads publish received`, { postId: post.id, platform: post.platform });
 
-    // Validate required fields
-    if (!post.content && !post.mediaUrl) {
-      logError("Threads publish failed: no content or media URL");
-      return { success: false, error: "No content or media URL provided" };
+    const validation = validatePlatformPostCapability(post);
+    if (validation.errors.length > 0) {
+      const error = validation.errors.join(" ");
+      logError("Threads publish validation failed", { postId: post.id, error });
+      return { success: false, error };
     }
 
     const scheduledAt = post.scheduledAt;
