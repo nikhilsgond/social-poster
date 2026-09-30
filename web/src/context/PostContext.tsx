@@ -7,6 +7,7 @@
 import { createContext, useContext, useReducer, useEffect, useCallback } from "react";
 import {
   fetchPosts,
+  fetchPost,
   createPost,
   createPosts,
   updatePost,
@@ -16,6 +17,9 @@ import {
 } from "../lib/supabasePosts";
 import type { Post } from "../types/post";
 import { useToast } from "../components/common/Toast";
+import { NativeSubmissionError, submitNativePost } from "../lib/backend";
+
+type NewPost = Omit<Post, "id" | "createdAt" | "updatedAt">;
 
 // ── Actions ──
 
@@ -54,10 +58,10 @@ interface PostContextType {
   state: PostState;
   posts: Post[];
   dispatch: React.Dispatch<PostAction>;
-  addPost: (post: Omit<Post, "id" | "createdAt" | "updatedAt">) => Promise<void>;
+  addPost: (post: NewPost) => Promise<void>;
   updatePost: (id: string, changes: Partial<Post>) => Promise<void>;
   deletePost: (id: string) => Promise<void>;
-  bulkAddPosts: (posts: Post[]) => Promise<Post[]>;
+  bulkAddPosts: (posts: NewPost[]) => Promise<Post[]>;
   movePost: (id: string, newDate: string) => Promise<void>;
   clearPosts: () => void;
   toggleSelect: (id: string) => void;
@@ -191,16 +195,33 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Action wrappers — all go through Supabase
-  const addPost = useCallback(async (postData: Omit<Post, "id" | "createdAt" | "updatedAt">) => {
+  const finalizeNativePost = useCallback(async (post: Post): Promise<Post> => {
+    if (post.status !== "scheduled" || (post.platform !== "fb" && post.platform !== "yt")) return post;
+    try {
+      return await submitNativePost(post);
+    } catch (err: any) {
+      // The backend owns the definitive status. Re-read it so an uncertain
+      // browser/network response never overwrites platform IDs or lifecycle data.
+      let refreshed = await fetchPost(post.id).catch(() => null);
+      if (err instanceof NativeSubmissionError && err.canMarkFailed && refreshed?.status === "scheduled" && !refreshed.platformPostId) {
+        refreshed = await updatePost(post.id, { status: "failed", errorMessage: err.message }).catch(() => refreshed);
+      }
+      showToast("Native scheduling needs attention", err?.message || "The backend did not accept the post.", "error");
+      return refreshed || post;
+    }
+  }, [showToast]);
+
+  const addPost = useCallback(async (postData: NewPost) => {
     try {
       dispatch({ type: "PUSH_SNAPSHOT" });
       const newPost = await createPost(postData);
-      dispatch({ type: "ADD_POST", payload: newPost });
+      const finalizedPost = await finalizeNativePost(newPost);
+      dispatch({ type: "ADD_POST", payload: finalizedPost });
       showToast("Post added", "New post has been added.", "success");
     } catch (err: any) {
       showToast("Error", formatSupabaseError(err), "error");
     }
-  }, [showToast]);
+  }, [finalizeNativePost, showToast]);
 
   const updatePostFn = useCallback(async (id: string, changes: Partial<Post>) => {
     try {
@@ -226,20 +247,24 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
     }
   }, [showToast]);
 
-  const bulkAddPostsFn = useCallback(async (posts: Post[]): Promise<Post[]> => {
+  const bulkAddPostsFn = useCallback(async (posts: NewPost[]): Promise<Post[]> => {
     try {
       dispatch({ type: "PUSH_SNAPSHOT" });
       const created = await createPosts(posts);
-      if (created.length) {
-        dispatch({ type: "BULK_ADD_POSTS", payload: created });
-        showToast("Import complete", `${created.length} posts imported.`, "success");
+      const finalized: Post[] = [];
+      for (const post of created) {
+        finalized.push(await finalizeNativePost(post));
       }
-      return created;
+      if (finalized.length) {
+        dispatch({ type: "BULK_ADD_POSTS", payload: finalized });
+        showToast("Import complete", `${finalized.length} posts imported.`, "success");
+      }
+      return finalized;
     } catch (err: any) {
       showToast("Error", formatSupabaseError(err), "error");
       return [];
     }
-  }, [showToast]);
+  }, [finalizeNativePost, showToast]);
 
   const movePostFn = useCallback(async (id: string, newDate: string) => {
     try {

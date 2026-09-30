@@ -31,6 +31,7 @@ interface TablesProps {
   onEditPost: (post: Post) => void;
   onViewPost: (post: Post) => void;
   onDeletePost: (id: string) => void;
+  onReusePost: (post: Post) => void;
   onClearFilters: () => void;
   selectedPosts: Record<string, boolean>;
   onToggleSelect: (id: string) => void;
@@ -96,7 +97,7 @@ export const Tables: React.FC<TablesProps> = ({
   tableContentType, onContentTypeChange, tableStatus, onStatusChange,
   tableSort, onSortChange, tableSortDir, onSortDirChange,
   selectionMode, onEnterDeleteMode, onExitDeleteMode, onDeleteSelected,
-  onExportJSON, onExportCSV, onPrint, onEditPost, onViewPost, onDeletePost, onClearFilters,
+  onExportJSON, onExportCSV, onPrint, onEditPost, onViewPost, onDeletePost, onReusePost, onClearFilters,
   selectedPosts, onToggleSelect, posts, pageSize, currentPage, onPageChange,
 }) => {
   const { showToast } = useToast();
@@ -222,7 +223,7 @@ export const Tables: React.FC<TablesProps> = ({
           {socialUrlCell}
           {metricCells}
           <td>{relativeTime(p.metricsUpdatedAt)}</td>
-          <td data-row-control="true"><button type="button" className="btn-secondary" data-action="edit-post" data-id={p.id} onClick={(e) => { e.stopPropagation(); onEditPost(p); }}>Edit</button></td>
+          <td data-row-control="true"><div className="table-row-actions"><button type="button" className="btn-secondary" data-action="edit-post" data-id={p.id} onClick={(e) => { e.stopPropagation(); onEditPost(p); }}>Edit</button><button type="button" className="btn-secondary" onClick={(e) => { e.stopPropagation(); onReusePost(p); }}>Reuse</button></div></td>
         </tr>
       );
     }
@@ -248,7 +249,7 @@ export const Tables: React.FC<TablesProps> = ({
         {socialUrlCell}
         {metricCells}
         <td>{relativeTime(p.metricsUpdatedAt)}</td>
-        <td data-row-control="true"><button type="button" className="btn-secondary" data-action="edit-post" data-id={p.id} onClick={(e) => { e.stopPropagation(); onEditPost(p); }}>Edit</button></td>
+        <td data-row-control="true"><div className="table-row-actions"><button type="button" className="btn-secondary" data-action="edit-post" data-id={p.id} onClick={(e) => { e.stopPropagation(); onEditPost(p); }}>Edit</button><button type="button" className="btn-secondary" onClick={(e) => { e.stopPropagation(); onReusePost(p); }}>Reuse</button></div></td>
       </tr>
     );
   }

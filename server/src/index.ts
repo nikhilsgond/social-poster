@@ -10,9 +10,10 @@ import { fileURLToPath } from "url";
 import { supabaseServer } from "./lib/supabase";
 import { logInfo, logError, logWarn } from "./lib/logger";
 import { runTestMode } from "./test-mode";
-import { getDuePosts, getPostById, updatePublishingResult, updatePublishingError, updateSchedulingResult, updateMetrics } from "./posts";
+import { claimDuePostForPublishing, claimPostForNativeScheduling, getDuePosts, getPostById, updatePublishingResult, updatePublishingError, updateSchedulingResult, updateMetrics } from "./posts";
 import { routePublisher } from "./platforms/router";
 import { SyncMetricsService, InstagramMetricsProvider, ThreadsMetricsProvider, YouTubeMetricsProvider, FacebookMetricsProvider } from "./metrics";
+import { applyCors, hasValidOwnerToken, rejectUnauthorized } from "./lib/http-security";
 
 // Load environment variables from .env file
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -20,11 +21,16 @@ dotenv.config({ path: path.join(__dirname, "..", ".env") });
 
 // Validate required environment variables
 function validateConfig(): boolean {
-  const required = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "META_PAGE_ID", "META_PAGE_ACCESS_TOKEN"];
+  const required = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "META_PAGE_ID", "META_PAGE_ACCESS_TOKEN", "OWNER_API_KEY"];
   const missing = required.filter((key) => !process.env[key]);
 
   if (missing.length > 0) {
     logError(`Missing required environment variables: ${missing.join(", ")}`);
+    return false;
+  }
+
+  if ((process.env.OWNER_API_KEY || "").length < 32) {
+    logError("OWNER_API_KEY must contain at least 32 characters");
     return false;
   }
 
@@ -35,17 +41,15 @@ function validateConfig(): boolean {
 // ── HTTP Server ──
 
 const PORT = process.env.PORT || 3001;
+const HOST = process.env.HOST || "127.0.0.1";
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://localhost:${PORT}`);
 
-  // Set CORS headers for development
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  const originAllowed = applyCors(req, res);
 
   if (req.method === "OPTIONS") {
-    res.writeHead(204);
+    res.writeHead(originAllowed ? 204 : 403);
     res.end();
     return;
   }
@@ -55,6 +59,13 @@ const server = http.createServer(async (req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "ok" }));
     logInfo("Health check requested");
+    return;
+  }
+
+  // All remaining routes expose private planner data or invoke operations with
+  // Supabase service-role/platform credentials.
+  if (!originAllowed || !hasValidOwnerToken(req)) {
+    rejectUnauthorized(res);
     return;
   }
 
@@ -112,45 +123,28 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname.match(/^\/publish\/[^\/]+$/) && req.method === "POST") {
     const id = url.pathname.split("/").pop()!;
     try {
-      const post = await getPostById(id!);
+      const post = await claimDuePostForPublishing(id);
       if (!post) {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Post not found" }));
-        return;
-      }
-
-      // Only publish if scheduled_at is in the past or not set
-      const canPublish = !post.scheduledAt || new Date(post.scheduledAt) <= new Date();
-      if (!canPublish) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Post is scheduled for a future date. Use /schedule/{id} for native scheduling." }));
+        res.writeHead(409, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Post is not due, has no valid schedule, or was already claimed" }));
         return;
       }
 
       const result = await routePublisher(post);
+      let updatedPost = null;
 
       if (result.success) {
-        // Update Supabase with the Facebook result
-        try {
-          await updatePublishingResult(
-            id,
-            result.platformPostId ?? "",
-            result.socialUrl ?? ""
-          );
-        } catch (dbErr: any) {
-          logError("Failed to update Supabase after publish", { error: dbErr.message });
-        }
+        updatedPost = await updatePublishingResult(
+          id,
+          result.platformPostId ?? "",
+          result.socialUrl ?? ""
+        );
       } else {
-        // Update Supabase with the error
-        try {
-          await updatePublishingError(id, result.error ?? "Publishing failed");
-        } catch (dbErr: any) {
-          logError("Failed to update Supabase error", { error: dbErr.message });
-        }
+        updatedPost = await updatePublishingError(id, result.error ?? "Publishing failed");
       }
 
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(result));
+      res.writeHead(result.success ? 200 : 502, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ...result, post: updatedPost }));
       logInfo(`Publish route executed for ${id}`, { success: result.success });
     } catch (err: any) {
       logError("Publish route failed", { error: err.message });
@@ -164,44 +158,30 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname.match(/^\/schedule\/[^\/]+$/) && req.method === "POST") {
     const id = url.pathname.split("/").pop()!;
     try {
-      const post = await getPostById(id!);
+      const post = await claimPostForNativeScheduling(id);
       if (!post) {
-        res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Post not found" }));
-        return;
-      }
-
-      // Only schedule if scheduled_at is in the future
-      if (!post.scheduledAt || new Date(post.scheduledAt) <= new Date()) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Post is not scheduled for a future date" }));
+        res.writeHead(409, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Post is not a claimable future Facebook/YouTube post or was already scheduled" }));
         return;
       }
 
       const result = await routePublisher(post);
+      let updatedPost = null;
 
       if (result.success) {
         // Update Supabase with scheduling result — keep status as "scheduled"
         // since YouTube/Facebook hold the native future schedule
-        try {
-          await updateSchedulingResult(
-            id,
-            result.platformPostId ?? "",
-            result.socialUrl ?? ""
-          );
-        } catch (dbErr: any) {
-          logError("Failed to update Supabase after scheduling", { error: dbErr.message });
-        }
+        updatedPost = await updateSchedulingResult(
+          id,
+          result.platformPostId ?? "",
+          result.socialUrl ?? ""
+        );
       } else {
-        try {
-          await updatePublishingError(id, result.error ?? "Scheduling failed");
-        } catch (dbErr: any) {
-          logError("Failed to update Supabase error", { error: dbErr.message });
-        }
+        updatedPost = await updatePublishingError(id, result.error ?? "Scheduling failed");
       }
 
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(result));
+      res.writeHead(result.success ? 200 : 502, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ...result, post: updatedPost }));
       logInfo(`Schedule route executed for ${id}`, { success: result.success });
     } catch (err: any) {
       logError("Schedule route failed", { error: err.message });
@@ -317,14 +297,10 @@ async function start() {
     process.exit(1);
   }
 
-  server.listen(PORT, () => {
+  server.listen(Number(PORT), HOST, () => {
     logInfo(`Social Poster Backend Server running on port ${PORT}`);
-    logInfo(`Health check: GET http://localhost:${PORT}/health`);
-    logInfo(`Due posts: GET http://localhost:${PORT}/posts/due`);
-    logInfo(`Test mode: POST http://localhost:${PORT}/test`);
-    logInfo(`Publish post: POST http://localhost:${PORT}/publish/{id}`);
-    logInfo(`Verify Facebook: GET http://localhost:${PORT}/verify-facebook`);
-    logInfo(`Metrics sync: POST http://localhost:${PORT}/metrics/sync`);
+    logInfo(`Health check: GET http://${HOST}:${PORT}/health`);
+    logInfo("All non-health routes require the owner bearer token");
   });
 }
 

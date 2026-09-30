@@ -12,6 +12,7 @@ import { Tables } from "./components/Tables/Tables";
 import { Metrics } from "./components/Metrics/Metrics";
 import { PostModal } from "./components/Post/PostModal";
 import { BulkImportModal } from "./components/BulkImport/BulkImportModal";
+import { ReuseSchedulerModal } from "./components/ReuseScheduler/ReuseSchedulerModal";
 import { CONTENT_TYPES } from "./lib/contentTypes";
 import { parseImportedPosts } from "./lib/validation";
 import type { Platform, Post, PostStatus, MetricSnapshot, DateRange, DateRangeType } from "./types/post";
@@ -148,6 +149,10 @@ function AppContent() {
   // ── Modal analytics toggle ──
   const [showAnalytics, setShowAnalytics] = useState(false);
 
+  // ── Phase 5 reuse scheduler ──
+  const [reuseOpen, setReuseOpen] = useState(false);
+  const [reuseSource, setReuseSource] = useState<Post | null>(null);
+
   // ── Drag state ──
   const [dragPostId, setDragPostId] = useState<string | null>(null);
 
@@ -246,6 +251,18 @@ function AppContent() {
     setModalCaption(post.caption || "");
     setModalMediaUrl(post.mediaUrl || "");
     setModalStatus(post.status);
+  }, []);
+
+  const openReuseScheduler = useCallback((post: Post | null = null) => {
+    setModalOpen(false);
+    setEditPost(null);
+    setReuseSource(post);
+    setReuseOpen(true);
+  }, []);
+
+  const closeReuseScheduler = useCallback(() => {
+    setReuseOpen(false);
+    setReuseSource(null);
   }, []);
 
   // ── Close Modal ──
@@ -459,9 +476,10 @@ function AppContent() {
   // ── Keyboard ──
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      const isModal = modalOpen || bulkImportOpen;
+      const isModal = modalOpen || bulkImportOpen || reuseOpen;
       if (e.key === "Escape") {
         if (selectionMode) { exitDeleteMode(); }
+        else if (reuseOpen) { closeReuseScheduler(); }
         else if (modalOpen) { closeModal(); }
         return;
       }
@@ -477,7 +495,7 @@ function AppContent() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [modalOpen, bulkImportOpen, selectionMode, view, undo, redo, navMonth, goToday, exitDeleteMode, closeModal]);
+  }, [modalOpen, bulkImportOpen, reuseOpen, selectionMode, view, undo, redo, navMonth, goToday, exitDeleteMode, closeModal, closeReuseScheduler]);
 
   // ── Content type options ──
   const contentTypeOptions = CONTENT_TYPES[modalPlatform] || [];
@@ -526,6 +544,9 @@ function AppContent() {
         </nav>
 
         <div className="toolbar-actions">
+          <button className="btn-secondary" type="button" onClick={() => openReuseScheduler(null)}>
+            Reuse &amp; Schedule
+          </button>
           <button className="btn-import" type="button" onClick={() => { setBulkJsonText(""); setBulkImportResult(null); setBulkErrors([]); setBulkImportOpen(true); }}>
             Bulk Import JSON
           </button>
@@ -596,6 +617,7 @@ function AppContent() {
               onEditPost={openEditModal}
               onViewPost={onViewPost}
               onDeletePost={deletePostFn}
+              onReusePost={openReuseScheduler}
               onClearFilters={clearFilters}
               selectedPosts={selectedPosts}
               onToggleSelect={toggleSelect}
@@ -784,7 +806,13 @@ function AppContent() {
             <div className="panel-actions">
               <div className="left">
                 {editPostId && (
-                  <button type="button" className="btn-danger btn-mini" onClick={() => { deletePostFn(editPostId); }}>Delete</button>
+                  <>
+                    <button type="button" className="btn-danger btn-mini" onClick={() => { deletePostFn(editPostId); }}>Delete</button>
+                    <button type="button" className="btn-secondary btn-mini" onClick={() => {
+                      const source = posts.find((post) => post.id === editPostId);
+                      if (source) openReuseScheduler(source);
+                    }}>Reuse</button>
+                  </>
                 )}
               </div>
               <div className="right">
@@ -886,6 +914,8 @@ function AppContent() {
           </div>
         </div>
       )}
+
+      {reuseOpen && <ReuseSchedulerModal sourcePost={reuseSource} onClose={closeReuseScheduler} />}
 
       <div className="toast-stack" aria-live="polite" />
     </div>

@@ -10,7 +10,7 @@ import { fileURLToPath } from "url";
 import dotenvConfig from "dotenv";
 import { ensureClient } from "./lib/supabase";
 import { logInfo, logError, logWarn } from "./lib/logger";
-import { getDuePosts, updatePublishingResult, updatePublishingError } from "./posts";
+import { claimDuePostForPublishing, getDuePosts, updatePublishingResult, updatePublishingError } from "./posts";
 import { routePublisher } from "./platforms/router";
 import type { Post } from "./types";
 
@@ -50,21 +50,27 @@ function validateConfig(): boolean {
 // ── Publish one post ──
 
 async function publishPost(post: Post): Promise<void> {
-  logInfo(`Publishing due post`, { postId: post.id, platform: post.platform });
+  const claimedPost = await claimDuePostForPublishing(post.id);
+  if (!claimedPost) {
+    logWarn(`Skipping post because another worker claimed it or it is no longer due`, { postId: post.id });
+    return;
+  }
 
-  const result = await routePublisher(post);
+  logInfo(`Publishing claimed due post`, { postId: claimedPost.id, platform: claimedPost.platform });
+
+  const result = await routePublisher(claimedPost);
 
   if (result.success && result.platformPostId) {
-    await updatePublishingResult(post.id, result.platformPostId, result.socialUrl ?? "");
+    await updatePublishingResult(claimedPost.id, result.platformPostId, result.socialUrl ?? "");
     logInfo(`Post published successfully`, {
-      postId: post.id,
+      postId: claimedPost.id,
       platformPostId: result.platformPostId,
       socialUrl: result.socialUrl,
     });
   } else {
     const errorMsg = result.error || "Publish returned no result";
-    await updatePublishingError(post.id, errorMsg);
-    logError(`Post publish failed`, { postId: post.id, error: errorMsg });
+    await updatePublishingError(claimedPost.id, errorMsg);
+    logError(`Post publish failed`, { postId: claimedPost.id, error: errorMsg });
   }
 }
 

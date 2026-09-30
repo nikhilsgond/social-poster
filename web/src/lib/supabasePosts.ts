@@ -5,7 +5,7 @@
 
 import { supabase } from "./supabase";
 import type { Post, MetricSnapshot, DateRange } from "../types/post";
-import { normalizePost } from "./validation";
+import { buildScheduledAt, normalizePost } from "./validation";
 
 // ── Date Range Helpers ──
 export function computeDateRange(type: "7d" | "30d" | "90d" | "custom", startDate?: string, endDate?: string): DateRange {
@@ -107,6 +107,13 @@ function dbRowToPost(row: any): Post {
 // Maps the application's camelCase Post to database snake_case columns.
 
 function postToDbRow(post: Post | Omit<Post, "id" | "createdAt" | "updatedAt">): any {
+  const scheduledAt = post.scheduledAt || buildScheduledAt(post.date, post.time);
+  if (post.scheduledAt && Number.isNaN(new Date(post.scheduledAt).getTime())) {
+    throw new Error("Invalid scheduled timestamp.");
+  }
+  if (post.status === "scheduled" && !scheduledAt) {
+    throw new Error("Scheduled posts require a valid date and time.");
+  }
   return {
     platform: post.platform,
     content_type: post.contentType,
@@ -117,7 +124,7 @@ function postToDbRow(post: Post | Omit<Post, "id" | "createdAt" | "updatedAt">):
     caption: post.caption ?? null,
     date: post.date,
     time: post.time ?? "00:00:00",
-    scheduled_at: post.scheduledAt ? new Date(post.scheduledAt).toISOString() : null,
+    scheduled_at: scheduledAt || null,
     media_url: post.mediaUrl ?? null,
     cloudinary_public_id: post.cloudinaryPublicId ?? null,
     social_url: post.socialUrl ?? null,
@@ -134,6 +141,47 @@ function postToDbRow(post: Post | Omit<Post, "id" | "createdAt" | "updatedAt">):
     source_id: post.sourceId ?? null,
     permalink: post.permalink ?? null,
   };
+}
+
+// Partial updates must only contain fields the caller actually changed. Using
+// postToDbRow here would turn every omitted publication/metrics field into a
+// null or zero and could detach an already-published post from its history.
+function postChangesToDbRow(changes: Partial<Post>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  const mappings: [keyof Post, string][] = [
+    ["platform", "platform"], ["contentType", "content_type"], ["title", "title"],
+    ["topic", "topic"], ["content", "content"], ["description", "description"],
+    ["caption", "caption"], ["date", "date"], ["time", "time"],
+    ["mediaUrl", "media_url"], ["cloudinaryPublicId", "cloudinary_public_id"],
+    ["socialUrl", "social_url"], ["mediaCleanedAt", "media_cleaned_at"],
+    ["status", "status"], ["platformPostId", "platform_post_id"],
+    ["errorMessage", "error_message"], ["attempts", "attempts"],
+    ["publishedAt", "published_at"], ["views", "views"], ["likes", "likes"],
+    ["comments", "comments"], ["metricsUpdatedAt", "metrics_updated_at"],
+    ["sourceId", "source_id"], ["permalink", "permalink"],
+  ];
+  for (const [key, column] of mappings) {
+    if (Object.prototype.hasOwnProperty.call(changes, key)) {
+      row[column] = changes[key] ?? null;
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(changes, "scheduledAt")) {
+    if (changes.status === "scheduled" && !changes.scheduledAt) {
+      throw new Error("Scheduled posts require a valid scheduling timestamp.");
+    }
+    if (changes.scheduledAt && Number.isNaN(new Date(changes.scheduledAt).getTime())) {
+      throw new Error("Invalid scheduled timestamp.");
+    }
+    row.scheduled_at = changes.scheduledAt ? new Date(changes.scheduledAt).toISOString() : null;
+  } else if (changes.date && changes.time !== undefined) {
+    const scheduledAt = buildScheduledAt(changes.date, changes.time);
+    if (changes.status === "scheduled" && !scheduledAt) {
+      throw new Error("Scheduled posts require a valid date and time.");
+    }
+    row.scheduled_at = scheduledAt || null;
+  }
+  row.updated_at = new Date().toISOString();
+  return row;
 }
 
 // ── Repository Functions ──
@@ -165,7 +213,7 @@ export async function createPosts(posts: Omit<Post, "id" | "createdAt" | "update
 }
 
 export async function updatePost(id: string, changes: Partial<Post>): Promise<Post | null> {
-  const row = postToDbRow(changes as Post);
+  const row = postChangesToDbRow(changes);
   const { data, error } = await supabase.from("posts").update(row).eq("id", id).select().single();
   if (error) throw error;
   return dbRowToPost(data);
@@ -177,9 +225,19 @@ export async function deletePost(id: string): Promise<void> {
 }
 
 export async function movePost(id: string, newDate: string): Promise<Post | null> {
+  const { data: current, error: fetchError } = await supabase
+    .from("posts")
+    .select("time")
+    .eq("id", id)
+    .single();
+  if (fetchError) throw fetchError;
   const { data, error } = await supabase
     .from("posts")
-    .update({ date: newDate, updated_at: new Date().toISOString() })
+    .update({
+      date: newDate,
+      scheduled_at: buildScheduledAt(newDate, current.time || "") || null,
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", id)
     .select()
     .single();

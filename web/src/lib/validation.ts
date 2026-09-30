@@ -23,6 +23,15 @@ export function generateId(): string {
   return "p_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
 }
 
+// Convert the date/time fields used by the planner into the timestamp consumed
+// by the publishing backend. The browser's local timezone is intentional: the
+// form represents the user's local calendar time and Supabase stores UTC.
+export function buildScheduledAt(date: string, time: string): string | undefined {
+  if (!date || !time) return undefined;
+  const value = new Date(`${date}T${time}:00`);
+  return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
+}
+
 // ── Normalization ──
 
 export function normalizePost(p: any): Post {
@@ -101,6 +110,9 @@ export function validatePost(input: any, platform?: Platform): ValidationResult 
   const validStatuses: PostStatus[] = ["draft", "scheduled", "publishing", "published", "failed"];
   if (input.status !== undefined && !validStatuses.includes(input.status as PostStatus)) {
     errors.push(`status must be one of ${validStatuses.join(", ")}.`);
+  }
+  if (input.status === "scheduled" && !buildScheduledAt(String(input.date || ""), String(input.time || ""))) {
+    errors.push("scheduled posts require a valid date and time.");
   }
 
   const valid = errors.length === 0;

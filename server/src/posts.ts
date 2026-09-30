@@ -43,6 +43,53 @@ export async function getPostById(id: string): Promise<Post | null> {
   }
 }
 
+// Atomically claim one due post. Because status="scheduled" is part of the
+// UPDATE predicate, only one concurrent worker can claim the row before the
+// external platform call.
+export async function claimDuePostForPublishing(id: string): Promise<Post | null> {
+  try {
+    const now = new Date().toISOString();
+    const { data, error } = await supabaseServer
+      .from("posts")
+      .update({ status: "publishing", updated_at: now, error_message: null })
+      .eq("id", id)
+      .eq("status", "scheduled")
+      .not("scheduled_at", "is", null)
+      .lte("scheduled_at", now)
+      .select()
+      .maybeSingle();
+
+    if (error) throw new DatabaseError(error.message);
+    return data ? normalizeRow(data) : null;
+  } catch (err: any) {
+    throw new DatabaseError(err.message);
+  }
+}
+
+// Native scheduling uses the same atomic claim pattern and also requires an
+// empty platform ID so an accepted Facebook/YouTube post is never resubmitted.
+export async function claimPostForNativeScheduling(id: string): Promise<Post | null> {
+  try {
+    const now = new Date().toISOString();
+    const { data, error } = await supabaseServer
+      .from("posts")
+      .update({ status: "publishing", updated_at: now, error_message: null })
+      .eq("id", id)
+      .eq("status", "scheduled")
+      .in("platform", ["fb", "yt"])
+      .is("platform_post_id", null)
+      .not("scheduled_at", "is", null)
+      .gt("scheduled_at", now)
+      .select()
+      .maybeSingle();
+
+    if (error) throw new DatabaseError(error.message);
+    return data ? normalizeRow(data) : null;
+  } catch (err: any) {
+    throw new DatabaseError(err.message);
+  }
+}
+
 // ── Update post status ──
 
 export async function updatePostStatus(id: string, status: Post["status"]): Promise<Post | null> {
@@ -80,6 +127,7 @@ export async function updatePublishingResult(
         error_message: null,
       })
       .eq("id", id)
+      .eq("status", "publishing")
       .select()
       .single();
 
@@ -102,6 +150,7 @@ export async function updatePublishingError(id: string, errorMessage: string): P
         updated_at: new Date().toISOString(),
       })
       .eq("id", id)
+      .eq("status", "publishing")
       .select()
       .single();
 
@@ -133,6 +182,7 @@ export async function updateSchedulingResult(
         error_message: null,
       })
       .eq("id", id)
+      .eq("status", "publishing")
       .select()
       .single();
 

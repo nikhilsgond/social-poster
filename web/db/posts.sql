@@ -71,7 +71,10 @@ CREATE TABLE IF NOT EXISTS public.posts (
 
   -- Timestamps
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+  CONSTRAINT posts_scheduled_at_required
+    CHECK (status <> 'scheduled' OR scheduled_at IS NOT NULL)
 );
 
 -- ── Content-Type Validation Note ──
