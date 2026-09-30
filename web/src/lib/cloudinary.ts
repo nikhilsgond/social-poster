@@ -103,7 +103,7 @@ export async function uploadVideoToCloudinary(
 
 // ── Validation ──
 
-export const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+export const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100 MiB
 
 export const SUPPORTED_IMAGE_TYPES = [
   "image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp"
@@ -120,7 +120,7 @@ export function getSupportedTypes(): string[] {
 export function validateMediaFile(file: File): { valid: boolean; error?: string } {
   if (!file) return { valid: false, error: "No file provided." };
   if (file.size > MAX_FILE_SIZE) {
-    return { valid: false, error: `File exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit.` };
+    return { valid: false, error: `File exceeds ${MAX_FILE_SIZE / 1024 / 1024} MiB limit.` };
   }
   const allTypes = [...SUPPORTED_IMAGE_TYPES, ...SUPPORTED_VIDEO_TYPES];
   if (!allTypes.includes(file.type)) {

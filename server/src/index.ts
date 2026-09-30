@@ -206,16 +206,22 @@ const server = http.createServer(async (req, res) => {
     try {
       const startDate = parseCalendarDate(url.searchParams.get("startDate"));
       const endDateExclusive = parseCalendarDate(url.searchParams.get("endDateExclusive"));
+      const startTime = url.searchParams.get("startTime") || "";
+      const endTimeExclusive = url.searchParams.get("endTimeExclusive") || "";
+      const timeZone = url.searchParams.get("timeZone") || "";
       const platform = url.searchParams.get("platform") || undefined;
-      if (!startDate || !endDateExclusive) {
+      let validTimeZone = true;
+      try { new Intl.DateTimeFormat("en", { timeZone }).format(); } catch { validTimeZone = false; }
+      if (!startDate || !endDateExclusive || !Number.isFinite(Date.parse(startTime)) || !Number.isFinite(Date.parse(endTimeExclusive)) || !validTimeZone) {
         res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "startDate and endDateExclusive must be valid YYYY-MM-DD dates." }));
+        res.end(JSON.stringify({ error: "Valid calendar dates and exact range boundaries are required." }));
         return;
       }
       const startMs = Date.parse(`${startDate}T00:00:00.000Z`);
       const endMs = Date.parse(`${endDateExclusive}T00:00:00.000Z`);
       const rangeDays = (endMs - startMs) / 86_400_000;
-      if (rangeDays <= 0 || rangeDays > MAX_METRICS_SYNC_DAYS) {
+      const exactRangeMs = Date.parse(endTimeExclusive) - Date.parse(startTime);
+      if (rangeDays <= 0 || rangeDays > MAX_METRICS_SYNC_DAYS || exactRangeMs <= 0 || exactRangeMs > (MAX_METRICS_SYNC_DAYS + 1) * 86_400_000) {
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: `Metrics sync range must be between 1 and ${MAX_METRICS_SYNC_DAYS} days.` }));
         return;
@@ -270,15 +276,18 @@ const server = http.createServer(async (req, res) => {
       const report = await service.syncAll({
         startDate,
         endDateExclusive,
+        startTime: new Date(startTime).toISOString(),
+        endTimeExclusive: new Date(endTimeExclusive).toISOString(),
+        timeZone,
         platform: platform as "ig" | "th" | "fb" | "yt" | undefined,
       });
 
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(report));
       logInfo(`Metrics sync endpoint executed`, {
-        postsFound: report.summary.postsFound,
-        postsUpdated: report.summary.postsUpdated,
-        postsFailed: report.summary.postsFailed,
+        discovered: report.summary.discovered,
+        updated: report.summary.updated,
+        failed: report.summary.failed,
       });
     } catch (err: any) {
       logError("Metrics sync endpoint failed", { error: err.message });

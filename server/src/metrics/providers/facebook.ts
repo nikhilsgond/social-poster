@@ -23,38 +23,20 @@
 // Part of Phase 1: Metrics Synchronization.
 
 import type { Post } from "../../types";
-import type { MetricProvider, MetricResult, FetchedMetrics } from "../interface";
+import type { MetricProvider, MetricResult, FetchedMetrics, MetricsSyncScope, DiscoveryResult } from "../interface";
 import { logInfo, logError } from "../../lib/logger";
+import { inScope, isOlderThanScope, looksLikePlatformAuthFailure, numberMetric, publicProviderError } from "./shared";
 
 const FB_BASE_URL = "https://graph.facebook.com/v26.0";
 
 // ── Metrics we fetch from the Page Post Insights endpoint ──
 // These are post-level metrics, not deprecated page-level metrics.
 const FB_INSIGHT_METRICS = [
-  "post_reactions_like_total",
-  "post_reactions_love_total",
-  "post_reactions_wow_total",
-  "post_reactions_haha_total",
-  "post_reactions_sad_total",
-  "post_reactions_angry_total",
-  "post_reactions_thankful_total",
-  "post_reactions_care_total",
-  "post_impressions",
-  "post_impressions_unique",
-  "post_story_shares",
-  "post_engaged_users",
-  "post_clicks",
-  "post_negative_feedback",
+  "post_media_view",
 ];
 
 // ── Video-specific metrics (only applicable to video posts) ──
-const FB_VIDEO_METRICS = [
-  "post_video_views",
-  "post_video_unique_views",
-  "post_video_avg_time_watched_actions",
-  "post_video_complete_views",
-  "post_video_view_time",
-];
+const FB_VIDEO_METRICS: string[] = [];
 
 // ── Map Facebook API metric names to our common field names ──
 function mapFacebookMetrics(
@@ -82,6 +64,10 @@ function mapFacebookMetrics(
         // We map impressions to views as a fallback, and also store impressions separately.
         result.views = numValue;
         platformMetrics.postImpressions = numValue;
+        break;
+      case "post_media_view":
+        result.views = numValue;
+        platformMetrics.mediaViews = numValue;
         break;
       case "post_impressions_unique":
         platformMetrics.postImpressionsUnique = numValue;
@@ -170,7 +156,62 @@ export class FacebookMetricsProvider implements MetricProvider {
     return true; // Availability determined by real API call
   }
 
-  async fetchMetrics(post: Post): Promise<MetricResult> {
+  async discoverPosts(scope: MetricsSyncScope): Promise<DiscoveryResult> {
+    const params = new URLSearchParams({
+      fields: "id,message,created_time,permalink_url,full_picture,attachments{media_type,type},shares,comments.limit(0).summary(true),reactions.type(LIKE).limit(0).summary(true)",
+      limit: "100",
+      since: String(Math.floor(Date.parse(scope.startTime) / 1000)),
+      until: String(Math.floor(Date.parse(scope.endTimeExclusive) / 1000)),
+      access_token: this.pageAccessToken,
+    });
+    let nextUrl: string | undefined = `${FB_BASE_URL}/${encodeURIComponent(this.pageId)}/posts?${params.toString()}`;
+    const posts: DiscoveryResult["posts"] = [];
+    try {
+      while (nextUrl) {
+        const response = await fetch(nextUrl);
+        const bodyText = await response.text();
+        if (!response.ok) {
+          return {
+            success: false,
+            posts,
+            platformUnavailable: looksLikePlatformAuthFailure(response.status, bodyText),
+            error: publicProviderError("Facebook"),
+          };
+        }
+        const body = JSON.parse(bodyText);
+        const page = Array.isArray(body.data) ? body.data : [];
+        let reachedOlder = false;
+        for (const item of page) {
+          if (!item.id || !item.created_time) continue;
+          if (isOlderThanScope(item.created_time, scope)) reachedOlder = true;
+          if (!inScope(item.created_time, scope)) continue;
+          const attachment = item.attachments?.data?.[0];
+          const type = String(attachment?.media_type || attachment?.type || "status").toLowerCase();
+          posts.push({
+            platform: "fb",
+            platformPostId: String(item.id),
+            publishedAt: new Date(item.created_time).toISOString(),
+            contentType: type.includes("video") ? "Video" : type.includes("photo") || type.includes("image") ? "Image" : type.includes("link") ? "Link" : "Text",
+            content: item.message || undefined,
+            mediaUrl: item.full_picture || undefined,
+            permalink: item.permalink_url || undefined,
+            metrics: {
+              likes: numberMetric(item.reactions?.summary?.total_count),
+              comments: numberMetric(item.comments?.summary?.total_count),
+              shares: numberMetric(item.shares?.count),
+            },
+          });
+        }
+        nextUrl = reachedOlder ? undefined : body.paging?.next;
+      }
+      return { success: true, posts };
+    } catch (err: any) {
+      logError("Facebook discovery failed", { error: err.message });
+      return { success: false, posts, error: publicProviderError("Facebook") };
+    }
+  }
+
+  async fetchMetrics(post: Post, knownMetrics?: FetchedMetrics): Promise<MetricResult> {
     const { platformPostId, id, contentType } = post;
 
     if (!platformPostId) {
@@ -186,7 +227,10 @@ export class FacebookMetricsProvider implements MetricProvider {
 
     try {
       // Build the metrics list — include video metrics for video content types
-      const metricsToFetch = [...FB_INSIGHT_METRICS];
+      const metricsToFetch = FB_INSIGHT_METRICS.filter((metric) =>
+        !(metric === "post_reactions_like_total" && knownMetrics?.likes !== undefined)
+        && !(metric === "post_story_shares" && knownMetrics?.shares !== undefined)
+      );
       if (isFacebookVideoContentType(contentType)) {
         metricsToFetch.push(...FB_VIDEO_METRICS);
       }
@@ -194,7 +238,7 @@ export class FacebookMetricsProvider implements MetricProvider {
       const metricParam = metricsToFetch.join(",");
 
       // GET /{page-post-id}/insights?metric=post_reactions_like_total,post_impressions,...
-      const url = `${FB_BASE_URL}/${platformPostId}/insights?metric=${encodeURIComponent(metricParam)}`;
+      const url = `${FB_BASE_URL}/${platformPostId}/insights?metric=${encodeURIComponent(metricParam)}&access_token=${encodeURIComponent(this.pageAccessToken)}`;
 
       const response = await fetch(url, {
         method: "GET",
@@ -203,21 +247,8 @@ export class FacebookMetricsProvider implements MetricProvider {
         },
       });
 
-      // Facebook Graph API uses access_token as query param
-      // But some endpoints also accept it in the Authorization header.
-      // We retry with access_token appended if the first attempt fails with 400.
-      let fbResponse = response;
-      let fbData = await response.json();
-
-      // If we got a 400 "An active access token is required", retry with token
-      if (response.status === 400 && fbData.error?.message?.includes("access token")) {
-        logInfo(`Facebook metrics: retrying with access token in URL`, { postId: id });
-        const retryUrl = `${url}&access_token=${encodeURIComponent(this.pageAccessToken)}`;
-        fbResponse = await fetch(retryUrl, { method: "GET" });
-        if (fbResponse.ok) {
-          fbData = await fbResponse.json();
-        }
-      }
+      const fbResponse = response;
+      const fbData = await response.json();
 
       if (!fbResponse.ok) {
         const errorBody = JSON.stringify(fbData.error ?? { message: "Unknown error" });
@@ -260,6 +291,9 @@ export class FacebookMetricsProvider implements MetricProvider {
       let commentCount: number | undefined;
 
       try {
+        if (knownMetrics?.comments !== undefined) {
+          commentCount = knownMetrics.comments;
+        } else {
         const commentUrl = `${FB_BASE_URL}/${platformPostId}?fields=comments&access_token=${encodeURIComponent(this.pageAccessToken)}`;
         const commentResponse = await fetch(commentUrl, { method: "GET" });
         if (commentResponse.ok) {
@@ -267,6 +301,7 @@ export class FacebookMetricsProvider implements MetricProvider {
           if (commentData.comments?.summary?.total_count != null) {
             commentCount = commentData.comments.summary.total_count;
           }
+        }
         }
       } catch {
         // Comment fetch is best-effort; don't fail the whole sync if it fails

@@ -5,8 +5,9 @@
 // Part of Phase 1: Metrics Synchronization.
 
 import type { Post } from "../../types";
-import type { MetricProvider, MetricResult, FetchedMetrics } from "../interface";
+import type { MetricProvider, MetricResult, FetchedMetrics, MetricsSyncScope, DiscoveryResult } from "../interface";
 import { logInfo, logError } from "../../lib/logger";
+import { inScope, isOlderThanScope, looksLikePlatformAuthFailure, numberMetric, publicProviderError } from "./shared";
 
 // ── Instagram Graph API host (same as the publishing client) ──
 const IG_BASE_URL = "https://graph.instagram.com/v26.0";
@@ -18,17 +19,14 @@ const COMMON_METRICS = [
   "shares",
   "saved",
   "reach",
-  "impressions",
-  "engagement",
+  "total_interactions",
+  "views",
 ];
 
 // ── Additional metrics for Reels ──
 const REEL_METRICS = [
-  "plays",
   "ig_reels_video_view_total_time",
   "ig_reels_avg_watch_time",
-  "ig_reels_replays_count",
-  "ig_reels_aggregated_all_plays_count",
 ];
 
 // ── Additional metrics for Stories ──
@@ -82,9 +80,9 @@ function mapInstagramMetrics(data: any[]): FetchedMetrics {
         result.platformMetrics = result.platformMetrics || {};
         result.platformMetrics.plays = typeof value === "number" ? value : Number(value);
         break;
-      case "engagement":
+      case "total_interactions":
         result.platformMetrics = result.platformMetrics || {};
-        result.platformMetrics.engagement = typeof value === "number" ? value : Number(value);
+        result.platformMetrics.totalInteractions = typeof value === "number" ? value : Number(value);
         break;
       case "ig_reels_video_view_total_time":
         result.platformMetrics = result.platformMetrics || {};
@@ -161,7 +159,61 @@ export class InstagramMetricsProvider implements MetricProvider {
     return true; // We test by making a real call in fetchMetrics
   }
 
-  async fetchMetrics(post: Post): Promise<MetricResult> {
+  async discoverPosts(scope: MetricsSyncScope): Promise<DiscoveryResult> {
+    const fields = "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count";
+    const params = new URLSearchParams({
+      fields,
+      limit: "100",
+      since: String(Math.floor(Date.parse(scope.startTime) / 1000)),
+      until: String(Math.floor(Date.parse(scope.endTimeExclusive) / 1000)),
+    });
+    let nextUrl: string | undefined = `${IG_BASE_URL}/${encodeURIComponent(this.userId)}/media?${params.toString()}`;
+    const posts: DiscoveryResult["posts"] = [];
+
+    try {
+      while (nextUrl) {
+        const response = await fetch(nextUrl, { headers: { Authorization: `Bearer ${this.accessToken}` } });
+        const bodyText = await response.text();
+        if (!response.ok) {
+          return {
+            success: false,
+            posts,
+            platformUnavailable: looksLikePlatformAuthFailure(response.status, bodyText),
+            error: publicProviderError("Instagram"),
+          };
+        }
+        const body = JSON.parse(bodyText);
+        const page = Array.isArray(body.data) ? body.data : [];
+        let reachedOlder = false;
+        for (const item of page) {
+          if (!item.id || !item.timestamp) continue;
+          if (isOlderThanScope(item.timestamp, scope)) reachedOlder = true;
+          if (!inScope(item.timestamp, scope)) continue;
+          const mediaType = String(item.media_product_type || item.media_type || "POST").toUpperCase();
+          posts.push({
+            platform: "ig",
+            platformPostId: String(item.id),
+            publishedAt: new Date(item.timestamp).toISOString(),
+            contentType: mediaType === "REELS" ? "Reel" : mediaType === "CAROUSEL_ALBUM" ? "Carousel" : mediaType === "STORY" ? "Story" : "Post",
+            caption: item.caption || undefined,
+            mediaUrl: item.thumbnail_url || item.media_url || undefined,
+            permalink: item.permalink || undefined,
+            metrics: {
+              likes: numberMetric(item.like_count),
+              comments: numberMetric(item.comments_count),
+            },
+          });
+        }
+        nextUrl = reachedOlder ? undefined : body.paging?.next;
+      }
+      return { success: true, posts };
+    } catch (err: any) {
+      logError("Instagram discovery failed", { error: err.message });
+      return { success: false, posts, error: publicProviderError("Instagram") };
+    }
+  }
+
+  async fetchMetrics(post: Post, knownMetrics?: FetchedMetrics): Promise<MetricResult> {
     const { platformPostId, id, contentType } = post;
 
     if (!platformPostId) {
@@ -177,7 +229,10 @@ export class InstagramMetricsProvider implements MetricProvider {
 
     try {
       // Build the metrics list based on content type
-      const metricsToFetch = [...COMMON_METRICS];
+      const metricsToFetch = COMMON_METRICS.filter((metric) =>
+        !(metric === "likes" && knownMetrics?.likes !== undefined)
+        && !(metric === "comments" && knownMetrics?.comments !== undefined)
+      );
 
       if (isReelContentType(contentType)) {
         metricsToFetch.push(...REEL_METRICS);

@@ -22,9 +22,12 @@ function requestOwnerToken(): string {
 export type MetricsSyncPlatform = "ig" | "th" | "fb" | "yt";
 
 export interface PlatformMetricsSyncResult {
-  found: number;
+  discovered: number;
+  added: number;
+  existing: number;
   updated: number;
   failed: number;
+  snapshotFailures: number;
   unavailable?: boolean;
   errors: string[];
 }
@@ -33,7 +36,7 @@ export interface MetricsSyncReport {
   success: boolean;
   startedAt: string;
   completedAt: string;
-  summary: { postsFound: number; postsUpdated: number; postsFailed: number };
+  summary: { discovered: number; added: number; existing: number; updated: number; failed: number; snapshotFailures: number };
   platforms: Partial<Record<MetricsSyncPlatform, PlatformMetricsSyncResult>>;
   errors: string[];
 }
@@ -41,6 +44,9 @@ export interface MetricsSyncReport {
 export interface MetricsSyncRequest {
   startDate: string;
   endDateExclusive: string;
+  startTime: string;
+  endTimeExclusive: string;
+  timeZone: string;
   platform: MetricsSyncPlatform;
 }
 
@@ -48,6 +54,9 @@ export async function syncMetrics(request: MetricsSyncRequest): Promise<MetricsS
   const params = new URLSearchParams({
     startDate: request.startDate,
     endDateExclusive: request.endDateExclusive,
+    startTime: request.startTime,
+    endTimeExclusive: request.endTimeExclusive,
+    timeZone: request.timeZone,
     platform: request.platform,
   });
   const response = await fetch(`${backendUrl}/metrics/sync?${params.toString()}`, {
@@ -64,7 +73,6 @@ export async function syncMetrics(request: MetricsSyncRequest): Promise<MetricsS
         : "The metrics service could not complete this request.";
     throw new Error(publicMessage);
   }
-  if (body.success !== true) throw new Error("The metrics service could not complete this request.");
   return body as MetricsSyncReport;
 }
 

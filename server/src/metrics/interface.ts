@@ -1,10 +1,7 @@
-// server/src/metrics/interface.ts
-// Metric provider interface for platform-specific metrics fetching.
-// Part of Phase 1: Metrics Synchronization.
-
 import type { Post } from "../types";
 
-// ── Common metric fields extracted from platform APIs ──
+export type MetricsSyncPlatform = "ig" | "th" | "fb" | "yt";
+
 export interface FetchedMetrics {
   views?: number;
   likes?: number;
@@ -13,32 +10,60 @@ export interface FetchedMetrics {
   platformMetrics?: Record<string, unknown>;
 }
 
-// ── Result returned by each provider ──
+export interface MetricsSyncScope {
+  startDate: string;
+  endDateExclusive: string;
+  startTime: string;
+  endTimeExclusive: string;
+  timeZone: string;
+  platform?: MetricsSyncPlatform;
+}
+
+export interface DiscoveredPost {
+  platform: MetricsSyncPlatform;
+  platformPostId: string;
+  publishedAt: string;
+  contentType: string;
+  title?: string;
+  content?: string;
+  description?: string;
+  caption?: string;
+  mediaUrl?: string;
+  permalink?: string;
+  metrics?: FetchedMetrics;
+  /** True when discovery already returned every metric supported by this provider. */
+  metricsComplete?: boolean;
+}
+
+export interface DiscoveryResult {
+  success: boolean;
+  posts: DiscoveredPost[];
+  platformUnavailable?: boolean;
+  error?: string;
+}
+
 export interface MetricResult {
   success: boolean;
   platformPostId: string;
   postId: string;
   metrics?: FetchedMetrics;
   error?: string;
-  // Platform-level failure (e.g. missing permissions) — different from a single post failing
   platformUnavailable?: boolean;
 }
 
-// ── Metric provider interface ──
-// Each platform implements its own fetchMetrics logic.
 export interface MetricProvider {
-  // Whether this provider's platform supports metrics retrieval at all
-  // (e.g. Threads may lack insights permissions)
   isAvailable(): boolean | Promise<boolean>;
-
-  fetchMetrics(post: Post): Promise<MetricResult>;
+  discoverPosts(scope: MetricsSyncScope): Promise<DiscoveryResult>;
+  fetchMetrics(post: Post, knownMetrics?: FetchedMetrics): Promise<MetricResult>;
 }
 
-// ── Sync report structure ──
 export interface PlatformSyncResult {
-  found: number;
+  discovered: number;
+  added: number;
+  existing: number;
   updated: number;
   failed: number;
+  snapshotFailures: number;
   unavailable?: boolean;
   errors: string[];
 }
@@ -48,21 +73,13 @@ export interface SyncReport {
   startedAt: string;
   completedAt: string;
   summary: {
-    postsFound: number;
-    postsUpdated: number;
-    postsFailed: number;
+    discovered: number;
+    added: number;
+    existing: number;
+    updated: number;
+    failed: number;
+    snapshotFailures: number;
   };
-  platforms: {
-    instagram?: PlatformSyncResult;
-    threads?: PlatformSyncResult;
-    youtube?: PlatformSyncResult;
-    facebook?: PlatformSyncResult;
-  };
+  platforms: Partial<Record<MetricsSyncPlatform, PlatformSyncResult>>;
   errors: string[];
-}
-
-export interface MetricsSyncScope {
-  startDate: string;
-  endDateExclusive: string;
-  platform?: "ig" | "th" | "fb" | "yt";
 }

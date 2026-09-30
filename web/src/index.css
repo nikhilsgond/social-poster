@@ -110,6 +110,7 @@ main#mainArea { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; sc
 .cal-sync-result.is-failed > b { color: var(--error); }
 .cal-sync-result.is-running { border-color: #666; }
 .cal-sync-button { margin-left: auto; white-space: nowrap; }
+.cal-sync-preset { min-width: 126px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-alt); color: var(--text); }
 .cal-sync-button:disabled { cursor: wait; opacity: .55; }
 .cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); max-width: 1180px; width: 100%; margin: 0 auto; }
 .cal-weekday { text-align: center; font-size: 0.74rem; color: var(--muted); padding: 6px 0; font-weight: 600; }

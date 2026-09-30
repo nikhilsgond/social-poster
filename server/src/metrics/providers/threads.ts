@@ -14,8 +14,9 @@
 // Part of Phase 1: Metrics Synchronization.
 
 import type { Post } from "../../types";
-import type { MetricProvider, MetricResult, FetchedMetrics } from "../interface";
+import type { MetricProvider, MetricResult, FetchedMetrics, MetricsSyncScope, DiscoveryResult } from "../interface";
 import { logInfo, logError } from "../../lib/logger";
+import { inScope, isOlderThanScope, looksLikePlatformAuthFailure, publicProviderError } from "./shared";
 
 const TH_BASE_URL = "https://graph.threads.net/v1.0";
 
@@ -91,7 +92,56 @@ export class ThreadsMetricsProvider implements MetricProvider {
     return true; // Availability is determined at runtime in fetchMetrics
   }
 
-  async fetchMetrics(post: Post): Promise<MetricResult> {
+  async discoverPosts(scope: MetricsSyncScope): Promise<DiscoveryResult> {
+    const params = new URLSearchParams({
+      fields: "id,media_product_type,media_type,media_url,permalink,text,timestamp,thumbnail_url",
+      limit: "100",
+      since: String(Math.floor(Date.parse(scope.startTime) / 1000)),
+      until: String(Math.floor(Math.min(Date.parse(scope.endTimeExclusive), Date.now()) / 1000)),
+      access_token: this.accessToken,
+    });
+    let nextUrl: string | undefined = `${TH_BASE_URL}/${encodeURIComponent(this.userId)}/threads?${params.toString()}`;
+    const posts: DiscoveryResult["posts"] = [];
+    try {
+      while (nextUrl) {
+        const response = await fetch(nextUrl);
+        const bodyText = await response.text();
+        if (!response.ok) {
+          return {
+            success: false,
+            posts,
+            platformUnavailable: looksLikePlatformAuthFailure(response.status, bodyText),
+            error: publicProviderError("Threads"),
+          };
+        }
+        const body = JSON.parse(bodyText);
+        const page = Array.isArray(body.data) ? body.data : [];
+        let reachedOlder = false;
+        for (const item of page) {
+          if (!item.id || !item.timestamp) continue;
+          if (isOlderThanScope(item.timestamp, scope)) reachedOlder = true;
+          if (!inScope(item.timestamp, scope)) continue;
+          const mediaType = String(item.media_type || item.media_product_type || "TEXT").toUpperCase();
+          posts.push({
+            platform: "th",
+            platformPostId: String(item.id),
+            publishedAt: new Date(item.timestamp).toISOString(),
+            contentType: mediaType === "VIDEO" ? "Video" : mediaType === "IMAGE" ? "Image" : mediaType === "CAROUSEL_ALBUM" ? "Carousel" : "Text",
+            content: item.text || undefined,
+            mediaUrl: item.thumbnail_url || item.media_url || undefined,
+            permalink: item.permalink || undefined,
+          });
+        }
+        nextUrl = reachedOlder ? undefined : body.paging?.next;
+      }
+      return { success: true, posts };
+    } catch (err: any) {
+      logError("Threads discovery failed", { error: err.message });
+      return { success: false, posts, error: publicProviderError("Threads") };
+    }
+  }
+
+  async fetchMetrics(post: Post, _knownMetrics?: FetchedMetrics): Promise<MetricResult> {
     const { platformPostId, id } = post;
 
     if (!platformPostId) {

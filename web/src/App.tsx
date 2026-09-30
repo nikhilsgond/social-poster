@@ -8,7 +8,7 @@ import { PostProvider, usePostContext } from "./context/PostContext";
 import { useToast, ToastProvider } from "./components/common/Toast";
 import { PlatformIcon, platformDataMap } from "./components/common/PlatformIcon";
 import { Calendar } from "./components/Calendar/Calendar";
-import type { CalendarMonthSyncState, CalendarPlatformSyncState } from "./components/Calendar/Calendar";
+import type { CalendarMonthSyncState, CalendarPlatformSyncState, CalendarSyncPreset } from "./components/Calendar/Calendar";
 import { Tables, getFilteredSortedPosts } from "./components/Tables/Tables";
 import { Metrics } from "./components/Metrics/Metrics";
 import { CreatePostWorkflow } from "./components/CreatePost/CreatePostWorkflow";
@@ -130,17 +130,24 @@ function AppContent() {
     results: {},
   });
 
-  const handleSyncMonth = useCallback(async () => {
+  const handleSync = useCallback(async (preset: CalendarSyncPreset) => {
     if (monthSync.running) return;
-    const { year, month } = currentMonth;
-    const startDate = `${year}-${String(month + 1).padStart(2, "0")}-01`;
-    const nextMonth = new Date(year, month + 1, 1);
-    const endDateExclusive = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, "0")}-01`;
-    const monthLabel = new Intl.DateTimeFormat("en", { month: "long", year: "numeric" })
-      .format(new Date(year, month, 1));
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const end = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+    const start = preset === "today"
+      ? today
+      : preset === "7d"
+        ? new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6)
+        : new Date(today.getFullYear(), today.getMonth(), 1);
+    if (preset === "month") end.setFullYear(today.getFullYear(), today.getMonth() + 1, 1);
+    const localDate = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+    const startDate = localDate(start);
+    const endDateExclusive = localDate(end);
+    const monthLabel = preset === "today" ? "Today" : preset === "7d" ? "Last 7 Days" : new Intl.DateTimeFormat("en", { month: "long", year: "numeric" }).format(start);
     const pendingResults = Object.fromEntries(METRICS_SYNC_PLATFORMS.map((platform) => [
       platform,
-      { status: "pending", eligible: 0, processed: 0, failed: 0 } satisfies CalendarPlatformSyncState,
+      { status: "pending", discovered: 0, added: 0, existing: 0, processed: 0, failed: 0, snapshotFailures: 0 } satisfies CalendarPlatformSyncState,
     ])) as Record<MetricsSyncPlatform, CalendarPlatformSyncState>;
     const completedResults: Partial<Record<MetricsSyncPlatform, CalendarPlatformSyncState>> = {};
     setMonthSync({ running: true, monthLabel, results: pendingResults });
@@ -151,23 +158,27 @@ function AppContent() {
         results: { ...current.results, [platform]: { ...current.results[platform]!, status: "running" } },
       }));
       try {
-        const report = await syncMetrics({ startDate, endDateExclusive, platform });
+        const report = await syncMetrics({ startDate, endDateExclusive, startTime: start.toISOString(), endTimeExclusive: end.toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, platform });
         const result = report.platforms[platform];
-        const eligible = result?.found ?? report.summary.postsFound;
-        const failed = result?.failed ?? report.summary.postsFailed;
-        const processed = (result?.updated ?? report.summary.postsUpdated) + failed;
+        const discovered = result?.discovered ?? report.summary.discovered;
+        const failed = result?.failed ?? report.summary.failed;
+        const processed = (result?.updated ?? report.summary.updated) + failed;
+        const hasErrors = Boolean(result?.errors.length || report.errors.length || report.success === false);
         const status: CalendarPlatformSyncState["status"] = result?.unavailable
           ? "unavailable"
-          : failed === 0
+          : failed === 0 && !hasErrors
             ? "succeeded"
-            : processed > failed
+            : (result?.updated ?? report.summary.updated) > 0
               ? "partial"
               : "failed";
         const platformState: CalendarPlatformSyncState = {
           status,
-          eligible,
+          discovered,
+          added: result?.added ?? report.summary.added,
+          existing: result?.existing ?? report.summary.existing,
           processed,
           failed,
+          snapshotFailures: result?.snapshotFailures ?? report.summary.snapshotFailures,
           message: result?.errors[0] || report.errors[0],
         };
         completedResults[platform] = platformState;
@@ -181,9 +192,12 @@ function AppContent() {
       } catch (err: any) {
         const platformState: CalendarPlatformSyncState = {
           status: "failed",
-          eligible: 0,
+          discovered: 0,
+          added: 0,
+          existing: 0,
           processed: 0,
           failed: 0,
+          snapshotFailures: 0,
           message: err?.message || "Metrics sync failed.",
         };
         completedResults[platform] = platformState;
@@ -204,7 +218,7 @@ function AppContent() {
     const successfulPlatforms = completed.filter((result) => result.status === "succeeded").length;
     const attentionPlatforms = completed.length - successfulPlatforms;
     showToast(
-      refreshFailed || attentionPlatforms > 0 ? "Month sync completed with details" : "Month sync complete",
+      refreshFailed || attentionPlatforms > 0 ? "Sync completed with details" : "Sync complete",
       refreshFailed
         ? `${monthLabel} was synchronized, but some refreshed data could not be loaded.`
         : attentionPlatforms > 0
@@ -212,7 +226,7 @@ function AppContent() {
           : `${monthLabel} metrics were synchronized across all supported platforms.`,
       refreshFailed || attentionPlatforms > 0 ? "warning" : "success",
     );
-  }, [currentMonth, monthSync.running, refreshPosts, reloadSnapshots, showToast]);
+  }, [monthSync.running, refreshPosts, reloadSnapshots, showToast]);
 
   // ── Table pagination state ──
   const [tablePageSize] = useState(15);
@@ -619,7 +633,7 @@ function AppContent() {
                 onJumpToTable={jumpToTable}
                 posts={posts}
                 onMovePost={handleCalendarMove}
-                onSyncMonth={handleSyncMonth}
+                onSync={handleSync}
                 monthSync={monthSync}
               />
             </>

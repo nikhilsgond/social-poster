@@ -12,17 +12,21 @@ interface CalendarProps {
   onAddPost: (defaults?: Partial<Post>) => void;
   onJumpToTable: (postId: string, platform: Platform) => void;
   onMovePost?: (postId: string, newDate: string) => void;
-  onSyncMonth: () => void;
+  onSync: (preset: CalendarSyncPreset) => void;
   monthSync: CalendarMonthSyncState;
 }
 
 export type CalendarSyncStatus = "pending" | "running" | "succeeded" | "partial" | "failed" | "unavailable";
+export type CalendarSyncPreset = "today" | "7d" | "month";
 
 export interface CalendarPlatformSyncState {
   status: CalendarSyncStatus;
-  eligible: number;
+  discovered: number;
+  added: number;
+  existing: number;
   processed: number;
   failed: number;
+  snapshotFailures: number;
   message?: string;
 }
 
@@ -68,12 +72,13 @@ export const Calendar: React.FC<CalendarProps> = ({
   onAddPost,
   onJumpToTable,
   onMovePost,
-  onSyncMonth,
+  onSync,
   monthSync,
 }) => {
   const hoverCloseTimer = useRef<number | null>(null);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [syncPreset, setSyncPreset] = useState<CalendarSyncPreset>("month");
 
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
@@ -268,14 +273,20 @@ export const Calendar: React.FC<CalendarProps> = ({
                   <PlatformIcon platform={platform} iconOnly />
                   <span>{platformDataMap[platform].name}</span>
                   <b>{statusLabel}</b>
-                  <small>{result.processed}/{result.eligible}{result.failed ? ` · ${result.failed} failed` : ""}</small>
+                  <small>{result.status === "running" ? "Discovering…" : `${result.discovered} found · ${result.added} added · ${result.existing} existing`}</small>
+                  {result.status !== "running" && <small>{result.processed}/{result.discovered} processed{result.failed ? ` · ${result.failed} failed` : ""}{result.snapshotFailures ? ` · ${result.snapshotFailures} snapshot` : ""}</small>}
                 </div>
               );
             })}
           </div>
         )}
-        <button className="btn-secondary cal-sync-button" type="button" onClick={onSyncMonth} disabled={monthSync.running}>
-          {monthSync.running ? "Syncing…" : "Sync Month"}
+        <select className="cal-sync-preset" value={syncPreset} onChange={(event) => setSyncPreset(event.target.value as CalendarSyncPreset)} disabled={monthSync.running} aria-label="Sync date range">
+          <option value="today">Today</option>
+          <option value="7d">Last 7 Days</option>
+          <option value="month">Current Month</option>
+        </select>
+        <button className="btn-secondary cal-sync-button" type="button" onClick={() => onSync(syncPreset)} disabled={monthSync.running}>
+          {monthSync.running ? "Syncing…" : "Sync"}
         </button>
       </div>
       <div className="cal-weekdays" aria-hidden="true">

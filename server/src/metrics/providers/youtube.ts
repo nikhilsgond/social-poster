@@ -1,213 +1,147 @@
-// server/src/metrics/providers/youtube.ts
-// YouTube metrics provider.
-// Uses the YouTube Data API v3 to fetch video statistics via
-// GET /youtube/v3/videos?part=statistics&id={videoId}.
-//
-// Authentication: Uses the existing OAuth2 refresh token flow (same as the
-// YouTube publishing client in lib/youtube.ts). Public statistics (viewCount,
-// likeCount, commentCount) are available via the standard YouTube Data API v3
-// with the existing OAuth token.
-//
-// YouTube has no "shares" metric in the Data API — shares will be 0 by default.
-// No historical analytics are fetched in this phase (would require Analytics API
-// with youtube.analytics.readonly scope).
-//
-// Part of Phase 1: Metrics Synchronization.
-
-import type { Post } from "../../types";
-import type { MetricProvider, MetricResult, FetchedMetrics } from "../interface";
-import { logInfo, logError } from "../../lib/logger";
 import { OAuth2Client } from "google-auth-library";
+import type { Post } from "../../types";
+import type { DiscoveryResult, FetchedMetrics, MetricProvider, MetricResult, MetricsSyncScope } from "../interface";
+import { logError } from "../../lib/logger";
+import { inScope, isOlderThanScope, looksLikePlatformAuthFailure, numberMetric, publicProviderError } from "./shared";
 
-const YOUTUBE_API_BASE = "https://www.googleapis.com/youtube/v3";
+const API_BASE = "https://www.googleapis.com/youtube/v3";
 
-// ── Map YouTube Data API v3 statistic names to our common field names ──
-function mapYouTubeStats(stats: any): FetchedMetrics {
-  const result: FetchedMetrics = {};
-
-  if (stats.viewCount != null) {
-    result.views = typeof stats.viewCount === "number" ? stats.viewCount : Number(stats.viewCount);
-  }
-  if (stats.likeCount != null) {
-    result.likes = typeof stats.likeCount === "number" ? stats.likeCount : Number(stats.likeCount);
-  }
-  if (stats.commentCount != null) {
-    result.comments = typeof stats.commentCount === "number" ? stats.commentCount : Number(stats.commentCount);
-  }
-  // YouTube Data API v3 does NOT have a shares metric.
-  // shares remains undefined/0 — we never fabricate a value.
-
+function chunks<T>(items: T[], size: number): T[][] {
+  const result: T[][] = [];
+  for (let index = 0; index < items.length; index += size) result.push(items.slice(index, index + size));
   return result;
 }
 
-// ── Get a fresh access token from the refresh token ──
-// Uses the same OAuth2 flow as the YouTube publishing client.
-// Reads env vars at call time (not module load) so dotenv has loaded .env first.
-async function getYouTubeAccessToken(): Promise<string> {
-  const YOUTUBE_CLIENT_ID = process.env.YOUTUBE_CLIENT_ID || "";
-  const YOUTUBE_CLIENT_SECRET = process.env.YOUTUBE_CLIENT_SECRET || "";
-  const YOUTUBE_REFRESH_TOKEN = process.env.YOUTUBE_REFRESH_TOKEN || "";
-  if (!YOUTUBE_CLIENT_ID || !YOUTUBE_CLIENT_SECRET || !YOUTUBE_REFRESH_TOKEN) {
-    throw new Error("YouTube OAuth credentials not configured (YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN)");
-  }
-
-  const oauth2Client = new OAuth2Client({
-    clientId: YOUTUBE_CLIENT_ID,
-    clientSecret: YOUTUBE_CLIENT_SECRET,
-    redirectUri: "http://localhost:8080/",
-  });
-
-  oauth2Client.setCredentials({
-    refresh_token: YOUTUBE_REFRESH_TOKEN,
-  });
-
-  const result = await oauth2Client.refreshAccessToken();
-  const accessToken = result.credentials.access_token;
-
-  if (!accessToken) {
-    throw new Error("Failed to refresh YouTube access token");
-  }
-
-  return accessToken;
+function isShort(duration: string | undefined): boolean {
+  if (!duration) return false;
+  const match = duration.match(/^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/);
+  if (!match) return false;
+  return Number(match[1] || 0) * 3600 + Number(match[2] || 0) * 60 + Number(match[3] || 0) <= 60;
 }
 
 export class YouTubeMetricsProvider implements MetricProvider {
-  constructor() {
-    // YouTube provider uses the shared OAuth credentials from environment.
-    // No per-post configuration needed.
+  private accessToken?: string;
+
+  isAvailable(): boolean { return true; }
+
+  private async getAccessToken(): Promise<string> {
+    if (this.accessToken) return this.accessToken;
+    const clientId = process.env.YOUTUBE_CLIENT_ID || "";
+    const clientSecret = process.env.YOUTUBE_CLIENT_SECRET || "";
+    const refreshToken = process.env.YOUTUBE_REFRESH_TOKEN || "";
+    if (!clientId || !clientSecret || !refreshToken) throw new Error("YouTube credentials are not configured");
+    const client = new OAuth2Client({ clientId, clientSecret, redirectUri: "http://localhost:8080/" });
+    client.setCredentials({ refresh_token: refreshToken });
+    const result = await client.refreshAccessToken();
+    if (!result.credentials.access_token) throw new Error("YouTube authorization failed");
+    this.accessToken = result.credentials.access_token;
+    return this.accessToken;
   }
 
-  isAvailable(): boolean {
-    // Availability depends on whether the OAuth credentials are configured
-    // and valid. We test by attempting a real call.
-    return true;
+  private async request(path: string): Promise<any> {
+    const response = await fetch(`${API_BASE}${path}`, {
+      headers: { Authorization: `Bearer ${await this.getAccessToken()}` },
+    });
+    const bodyText = await response.text();
+    if (!response.ok) {
+      const error = new Error(publicProviderError("YouTube")) as Error & { status?: number; body?: string };
+      error.status = response.status;
+      error.body = bodyText;
+      throw error;
+    }
+    return JSON.parse(bodyText);
   }
 
-  async fetchMetrics(post: Post): Promise<MetricResult> {
-    const { platformPostId, id } = post;
+  async discoverPosts(scope: MetricsSyncScope): Promise<DiscoveryResult> {
+    try {
+      const channels = await this.request("/channels?part=contentDetails&mine=true");
+      const uploadsId = channels.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
+      if (!uploadsId) return { success: false, posts: [], platformUnavailable: true, error: publicProviderError("YouTube") };
 
-    if (!platformPostId) {
+      const candidates: Array<{ id: string; publishedAt: string }> = [];
+      let pageToken = "";
+      let reachedOlder = false;
+      do {
+        const params = new URLSearchParams({ part: "snippet,contentDetails", playlistId: uploadsId, maxResults: "50" });
+        if (pageToken) params.set("pageToken", pageToken);
+        const page = await this.request(`/playlistItems?${params.toString()}`);
+        for (const item of page.items || []) {
+          const id = item.contentDetails?.videoId || item.snippet?.resourceId?.videoId;
+          const publishedAt = item.contentDetails?.videoPublishedAt || item.snippet?.publishedAt;
+          if (!id || !publishedAt) continue;
+          if (isOlderThanScope(publishedAt, scope)) reachedOlder = true;
+          if (inScope(publishedAt, scope)) candidates.push({ id, publishedAt });
+        }
+        pageToken = reachedOlder ? "" : page.nextPageToken || "";
+      } while (pageToken);
+
+      const posts: DiscoveryResult["posts"] = [];
+      for (const batch of chunks(candidates, 50)) {
+        const params = new URLSearchParams({
+          part: "snippet,statistics,status,contentDetails",
+          id: batch.map((item) => item.id).join(","),
+          maxResults: "50",
+        });
+        const response = await this.request(`/videos?${params.toString()}`);
+        for (const item of response.items || []) {
+          const fallback = candidates.find((candidate) => candidate.id === item.id);
+          const publishedAt = item.snippet?.publishedAt || fallback?.publishedAt;
+          if (!publishedAt || !inScope(publishedAt, scope) || item.status?.privacyStatus === "private") continue;
+          const thumbnails = item.snippet?.thumbnails || {};
+          const thumbnail = thumbnails.maxres?.url || thumbnails.standard?.url || thumbnails.high?.url || thumbnails.medium?.url || thumbnails.default?.url;
+          posts.push({
+            platform: "yt",
+            platformPostId: String(item.id),
+            publishedAt: new Date(publishedAt).toISOString(),
+            contentType: isShort(item.contentDetails?.duration) ? "Short" : "Video",
+            title: item.snippet?.title || undefined,
+            description: item.snippet?.description || undefined,
+            mediaUrl: thumbnail || undefined,
+            permalink: `https://www.youtube.com/watch?v=${encodeURIComponent(item.id)}`,
+            metrics: {
+              views: numberMetric(item.statistics?.viewCount),
+              likes: numberMetric(item.statistics?.likeCount),
+              comments: numberMetric(item.statistics?.commentCount),
+            },
+            metricsComplete: true,
+          });
+        }
+      }
+      return { success: true, posts };
+    } catch (err: any) {
+      logError("YouTube discovery failed", { error: err.message });
       return {
         success: false,
-        platformPostId: "",
-        postId: id,
-        error: "No platformPostId (YouTube video ID) available for metrics",
+        posts: [],
+        platformUnavailable: looksLikePlatformAuthFailure(err.status || 0, err.body || err.message || ""),
+        error: publicProviderError("YouTube"),
       };
     }
+  }
 
-    logInfo(`YouTube metrics fetch`, { postId: id, videoId: platformPostId });
-
+  async fetchMetrics(post: Post, _knownMetrics?: FetchedMetrics): Promise<MetricResult> {
+    const platformPostId = post.platformPostId || "";
     try {
-      const accessToken = await getYouTubeAccessToken();
-
-      // GET /youtube/v3/videos?part=statistics&id={videoId}&key={accessToken}
-      // Using OAuth access token (not API key) since we already have OAuth set up.
-      const url = `${YOUTUBE_API_BASE}/videos?part=statistics&id=${encodeURIComponent(platformPostId)}`;
-
-      const response = await fetch(url, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-      });
-
-      if (!response.ok) {
-        const errorBody = await response.text();
-        logError(`YouTube Data API error`, {
-          postId: id,
-          videoId: platformPostId,
-          status: response.status,
-        });
-        return {
-          success: false,
-          platformPostId,
-          postId: id,
-          error: `YouTube API error ${response.status}: ${errorBody.slice(0, 300)}`,
-        };
-      }
-
-      const data = await response.json();
-
-      // The videos.list endpoint returns { items: [...] }
-      if (!data.items || data.items.length === 0) {
-        logError(`YouTube video not found`, {
-          postId: id,
-          videoId: platformPostId,
-        });
-        return {
-          success: false,
-          platformPostId,
-          postId: id,
-          error: `YouTube video not found: ${platformPostId}`,
-        };
-      }
-
-      const stats = data.items[0].statistics;
-
-      if (!stats) {
-        logError(`YouTube video has no statistics`, {
-          postId: id,
-          videoId: platformPostId,
-        });
-        return {
-          success: false,
-          platformPostId,
-          postId: id,
-          error: `YouTube video statistics unavailable for video ${platformPostId}`,
-        };
-      }
-
-      const mapped = mapYouTubeStats(stats);
-
-      logInfo(`YouTube metrics fetched`, {
-        postId: id,
-        videoId: platformPostId,
-        views: mapped.views,
-        likes: mapped.likes,
-        comments: mapped.comments,
-        shares: "N/A (YouTube Data API does not expose shares)",
-      });
-
+      const params = new URLSearchParams({ part: "statistics", id: platformPostId });
+      const item = (await this.request(`/videos?${params.toString()}`)).items?.[0];
+      if (!item) return { success: false, platformPostId, postId: post.id, error: publicProviderError("YouTube") };
       return {
         success: true,
         platformPostId,
-        postId: id,
-        metrics: mapped,
+        postId: post.id,
+        metrics: {
+          views: numberMetric(item.statistics?.viewCount),
+          likes: numberMetric(item.statistics?.likeCount),
+          comments: numberMetric(item.statistics?.commentCount),
+        },
       };
     } catch (err: any) {
-      // Detect OAuth scope issues
-      const errMsg = err.message || String(err);
-      const isScopeError =
-        errMsg.includes("insufficient_scope") ||
-        errMsg.includes("HTTPS") && errMsg.includes("403") ||
-        errMsg.toLowerCase().includes("quota") ||
-        errMsg.toLowerCase().includes("unauthorized");
-
-      if (isScopeError && errMsg.includes("OAuth")) {
-        logError(`YouTube OAuth scope issue for metrics`, {
-          postId: post.id,
-          error: errMsg.slice(0, 200),
-        });
-        return {
-          success: false,
-          platformPostId: post.platformPostId ?? "",
-          postId: post.id,
-          error: `YouTube metrics unavailable (OAuth issue): ${errMsg.slice(0, 200)}`,
-          platformUnavailable: true,
-        };
-      }
-
-      logError(`YouTube metrics fetch exception`, {
-        postId: post.id,
-        platformPostId,
-        error: errMsg,
-      });
       return {
         success: false,
-        platformPostId: post.platformPostId ?? "",
+        platformPostId,
         postId: post.id,
-        error: errMsg || "YouTube metrics fetch failed",
+        platformUnavailable: looksLikePlatformAuthFailure(err.status || 0, err.body || err.message || ""),
+        error: publicProviderError("YouTube"),
       };
     }
   }
