@@ -20,6 +20,7 @@ import type {
   PlatformSyncResult,
   SyncReport,
   FetchedMetrics,
+  MetricsSyncScope,
 } from "./interface";
 import { updateMetrics } from "../posts";
 
@@ -137,7 +138,7 @@ export class SyncMetricsService {
     this.concurrencyLimit = concurrencyLimit;
   }
 
-  async syncAll(): Promise<SyncReport> {
+  async syncAll(scope?: MetricsSyncScope): Promise<SyncReport> {
     const startedAt = new Date().toISOString();
     const capturedAt = minuteBoundary();
 
@@ -159,12 +160,19 @@ export class SyncMetricsService {
     // ── Step 1: Fetch all published posts with platform_post_id ──
     let posts: Post[];
     try {
-      const { data, error } = await supabaseServer
+      let query = supabaseServer
         .from("posts")
         .select("*")
         .eq("status", "published")
         .not("platform_post_id", "is", null)
         .order("published_at", { ascending: true });
+
+      if (scope) {
+        query = query.gte("date", scope.startDate).lt("date", scope.endDateExclusive);
+        if (scope.platform) query = query.eq("platform", scope.platform);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
       posts = (data || []).map((row: any) => ({
@@ -198,8 +206,8 @@ export class SyncMetricsService {
         updatedAt: row.updated_at,
       }));
     } catch (err: any) {
-      const msg = `Failed to fetch published posts: ${err.message}`;
-      logError(msg);
+      const msg = "Eligible planner posts could not be loaded for metrics synchronization.";
+      logError("Failed to fetch published posts for metrics synchronization", { error: err.message });
       report.success = false;
       report.errors.push(msg);
       report.completedAt = new Date().toISOString();
@@ -212,6 +220,39 @@ export class SyncMetricsService {
     if (posts.length === 0) {
       report.completedAt = new Date().toISOString();
       return report;
+    }
+
+    // Load the latest known snapshot once for each eligible post. Provider
+    // responses may be partial, so new snapshots are based on this known state.
+    const latestSnapshots = new Map<string, {
+      shares: number;
+      platformMetrics: Record<string, unknown>;
+    }>();
+    try {
+      const { data, error } = await supabaseServer
+        .from("post_metric_snapshots")
+        .select("post_id, shares, platform_metrics, captured_at")
+        .in("post_id", posts.map((post) => post.id))
+        .order("captured_at", { ascending: false });
+      if (error) throw error;
+      for (const row of data || []) {
+        if (latestSnapshots.has(row.post_id)) continue;
+        let rawPlatformMetrics = row.platform_metrics;
+        if (typeof rawPlatformMetrics === "string") {
+          try { rawPlatformMetrics = JSON.parse(rawPlatformMetrics); }
+          catch { rawPlatformMetrics = {}; }
+        }
+        latestSnapshots.set(row.post_id, {
+          shares: Number(row.shares) || 0,
+          platformMetrics: rawPlatformMetrics && typeof rawPlatformMetrics === "object"
+            ? rawPlatformMetrics as Record<string, unknown>
+            : {},
+        });
+      }
+    } catch (err: any) {
+      logWarn("Could not load prior metric snapshots; common post metrics will still be preserved", {
+        error: err.message,
+      });
     }
 
     // ── Step 2: Group posts by platform ──
@@ -229,12 +270,13 @@ export class SyncMetricsService {
       const provider = this.providers.get(platform);
 
       if (!provider) {
-        const msg = `No metrics provider configured for platform: ${platform}`;
+        const msg = `Metrics are unavailable because ${platform} credentials are not configured.`;
         logWarn(msg);
         report.platforms[platform as keyof SyncReport["platforms"]] = {
           found: platformPosts.length,
           updated: 0,
           failed: platformPosts.length,
+          unavailable: true,
           errors: [msg],
         };
         report.summary.postsFailed += platformPosts.length;
@@ -285,35 +327,40 @@ export class SyncMetricsService {
         if (result.success && result.metrics) {
           // Update current metrics in posts table (views, likes, comments only — not shares)
           try {
-            await updateMetrics(post.id, result.metrics);
+            const updatedPost = await updateMetrics(post.id, result.metrics);
+            const previousSnapshot = latestSnapshots.get(post.id);
+            const effectiveMetrics: FetchedMetrics = {
+              views: result.metrics.views ?? updatedPost?.views ?? post.views ?? 0,
+              likes: result.metrics.likes ?? updatedPost?.likes ?? post.likes ?? 0,
+              comments: result.metrics.comments ?? updatedPost?.comments ?? post.comments ?? 0,
+              shares: result.metrics.shares ?? previousSnapshot?.shares ?? 0,
+              platformMetrics: {
+                ...(previousSnapshot?.platformMetrics || {}),
+                ...(result.metrics.platformMetrics || {}),
+              },
+            };
+
+            try {
+              await upsertSnapshot(
+                post.id,
+                platform,
+                capturedAt,
+                effectiveMetrics,
+                Object.keys(effectiveMetrics.platformMetrics || {}).length > 0
+                  ? effectiveMetrics.platformMetrics
+                  : undefined
+              );
+            } catch (snapErr: any) {
+              // Snapshot failure is non-fatal because current metrics are saved.
+              logError(`Failed to save snapshot for post ${post.id}`, { error: snapErr.message });
+              platformResult.errors.push(`Post ${post.id.slice(0, 8)}: snapshot could not be saved.`);
+            }
           } catch (dbErr: any) {
             logError(`Failed to update metrics for post ${post.id}`, { error: dbErr.message });
             platformResult.failed++;
             report.summary.postsFailed++;
-            platformResult.errors.push(`Post ${post.id}: DB update failed — ${dbErr.message}`);
+            platformResult.errors.push(`Post ${post.id.slice(0, 8)}: metrics could not be saved.`);
             continue;
-          }
-
-          // Save snapshot
-          try {
-            const platformMetricsExtra = result.metrics.platformMetrics ?? {};
-            // Remove top-level fields that are already stored as columns
-            delete (platformMetricsExtra as any).views;
-            delete (platformMetricsExtra as any).likes;
-            delete (platformMetricsExtra as any).comments;
-            delete (platformMetricsExtra as any).shares;
-
-            await upsertSnapshot(
-              post.id,
-              platform,
-              capturedAt,
-              result.metrics,
-              Object.keys(platformMetricsExtra).length > 0 ? platformMetricsExtra : undefined
-            );
-          } catch (snapErr: any) {
-            // Snapshot failure is non-fatal — metrics are already updated
-            logError(`Failed to save snapshot for post ${post.id}`, { error: snapErr.message });
-            platformResult.errors.push(`Post ${post.id}: snapshot save failed — ${snapErr.message}`);
           }
 
           platformResult.updated++;
@@ -325,13 +372,13 @@ export class SyncMetricsService {
           if (result.platformUnavailable) {
             platformResult.unavailable = true;
             report.summary.postsFailed++;
-            platformResult.errors.push(`Platform ${platform} unavailable: ${result.error}`);
-            report.errors.push(`Platform ${platform} unavailable: ${result.error}`);
+            platformResult.errors.push(`Metrics permissions are unavailable for ${platform}.`);
+            report.errors.push(`Metrics permissions are unavailable for ${platform}.`);
           } else {
             report.summary.postsFailed++;
             const postRef = post.id.slice(0, 8);
-            platformResult.errors.push(`Post ${postRef}: ${result.error}`);
-            report.errors.push(`${platform}/${postRef}: ${result.error}`);
+            platformResult.errors.push(`Post ${postRef}: metrics could not be fetched.`);
+            report.errors.push(`${platform}/${postRef}: metrics could not be fetched.`);
           }
 
           logError(`Metrics sync failed for post`, {

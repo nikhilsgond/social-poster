@@ -13,10 +13,59 @@ export class NativeSubmissionError extends Error {
 function requestOwnerToken(): string {
   const existing = sessionStorage.getItem(OWNER_TOKEN_KEY);
   if (existing) return existing;
-  const supplied = window.prompt("Enter your Social Planner owner API key to publish or schedule this post:")?.trim() || "";
-  if (!supplied) throw new NativeSubmissionError("Native scheduling requires the owner API key.", true);
+  const supplied = window.prompt("Enter your Social Planner owner API key for this protected operation:")?.trim() || "";
+  if (!supplied) throw new NativeSubmissionError("This operation requires the owner API key.", true);
   sessionStorage.setItem(OWNER_TOKEN_KEY, supplied);
   return supplied;
+}
+
+export type MetricsSyncPlatform = "ig" | "th" | "fb" | "yt";
+
+export interface PlatformMetricsSyncResult {
+  found: number;
+  updated: number;
+  failed: number;
+  unavailable?: boolean;
+  errors: string[];
+}
+
+export interface MetricsSyncReport {
+  success: boolean;
+  startedAt: string;
+  completedAt: string;
+  summary: { postsFound: number; postsUpdated: number; postsFailed: number };
+  platforms: Partial<Record<MetricsSyncPlatform, PlatformMetricsSyncResult>>;
+  errors: string[];
+}
+
+export interface MetricsSyncRequest {
+  startDate: string;
+  endDateExclusive: string;
+  platform: MetricsSyncPlatform;
+}
+
+export async function syncMetrics(request: MetricsSyncRequest): Promise<MetricsSyncReport> {
+  const params = new URLSearchParams({
+    startDate: request.startDate,
+    endDateExclusive: request.endDateExclusive,
+    platform: request.platform,
+  });
+  const response = await fetch(`${backendUrl}/metrics/sync?${params.toString()}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${requestOwnerToken()}` },
+  });
+  const body = await response.json().catch(() => ({}));
+  if (response.status === 401) sessionStorage.removeItem(OWNER_TOKEN_KEY);
+  if (!response.ok) {
+    const publicMessage = response.status === 400 && typeof body.error === "string"
+      ? body.error
+      : response.status === 401
+        ? "The owner API key was rejected."
+        : "The metrics service could not complete this request.";
+    throw new Error(publicMessage);
+  }
+  if (body.success !== true) throw new Error("The metrics service could not complete this request.");
+  return body as MetricsSyncReport;
 }
 
 export async function submitNativePost(post: Post): Promise<Post> {

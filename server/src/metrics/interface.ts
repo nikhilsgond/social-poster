@@ -60,3 +60,9 @@ export interface SyncReport {
   };
   errors: string[];
 }
+
+export interface MetricsSyncScope {
+  startDate: string;
+  endDateExclusive: string;
+  platform?: "ig" | "th" | "fb" | "yt";
+}

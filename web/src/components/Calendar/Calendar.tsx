@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { PlatformIcon, platformDataMap } from "../common/PlatformIcon";
 import { getStatusClass, getStatusLabel, type Platform, type Post } from "../../types/post";
+import type { MetricsSyncPlatform } from "../../lib/backend";
 
 const PLATFORMS: Platform[] = ["yt", "ig", "fb", "th", "li", "x"];
 
@@ -11,6 +12,24 @@ interface CalendarProps {
   onAddPost: (defaults?: Partial<Post>) => void;
   onJumpToTable: (postId: string, platform: Platform) => void;
   onMovePost?: (postId: string, newDate: string) => void;
+  onSyncMonth: () => void;
+  monthSync: CalendarMonthSyncState;
+}
+
+export type CalendarSyncStatus = "pending" | "running" | "succeeded" | "partial" | "failed" | "unavailable";
+
+export interface CalendarPlatformSyncState {
+  status: CalendarSyncStatus;
+  eligible: number;
+  processed: number;
+  failed: number;
+  message?: string;
+}
+
+export interface CalendarMonthSyncState {
+  running: boolean;
+  monthLabel: string;
+  results: Partial<Record<MetricsSyncPlatform, CalendarPlatformSyncState>>;
 }
 
 interface PreviewState {
@@ -49,6 +68,8 @@ export const Calendar: React.FC<CalendarProps> = ({
   onAddPost,
   onJumpToTable,
   onMovePost,
+  onSyncMonth,
+  monthSync,
 }) => {
   const hoverCloseTimer = useRef<number | null>(null);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
@@ -231,6 +252,32 @@ export const Calendar: React.FC<CalendarProps> = ({
 
   return (
     <>
+      <div className="cal-sync-bar">
+        <div className="cal-sync-heading">
+          <strong>{monthSync.running ? "Synchronizing" : "Metrics sync"}</strong>
+          <span>{monthSync.monthLabel || new Intl.DateTimeFormat("en", { month: "long", year: "numeric" }).format(new Date(year, month, 1))}</span>
+        </div>
+        {Object.keys(monthSync.results).length > 0 && (
+          <div className="cal-sync-results" aria-live="polite">
+            {(["ig", "th", "fb", "yt"] as MetricsSyncPlatform[]).map((platform) => {
+              const result = monthSync.results[platform];
+              if (!result) return null;
+              const statusLabel = result.status.charAt(0).toUpperCase() + result.status.slice(1);
+              return (
+                <div className={`cal-sync-result is-${result.status}`} key={platform} title={result.message || ""}>
+                  <PlatformIcon platform={platform} iconOnly />
+                  <span>{platformDataMap[platform].name}</span>
+                  <b>{statusLabel}</b>
+                  <small>{result.processed}/{result.eligible}{result.failed ? ` · ${result.failed} failed` : ""}</small>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <button className="btn-secondary cal-sync-button" type="button" onClick={onSyncMonth} disabled={monthSync.running}>
+          {monthSync.running ? "Syncing…" : "Sync Month"}
+        </button>
+      </div>
       <div className="cal-weekdays" aria-hidden="true">
         {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((weekday) => (
           <div className="cal-weekday" key={weekday}>{weekday}</div>

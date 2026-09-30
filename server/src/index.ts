@@ -42,6 +42,16 @@ function validateConfig(): boolean {
 
 const PORT = process.env.PORT || 3001;
 const HOST = process.env.HOST || "127.0.0.1";
+const METRICS_SYNC_PLATFORMS = new Set(["ig", "th", "fb", "yt"]);
+const MAX_METRICS_SYNC_DAYS = 366;
+
+function parseCalendarDate(value: string | null): string | null {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+    ? value
+    : null;
+}
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://localhost:${PORT}`);
@@ -194,6 +204,28 @@ const server = http.createServer(async (req, res) => {
   // Metrics synchronization
   if (url.pathname === "/metrics/sync" && req.method === "POST") {
     try {
+      const startDate = parseCalendarDate(url.searchParams.get("startDate"));
+      const endDateExclusive = parseCalendarDate(url.searchParams.get("endDateExclusive"));
+      const platform = url.searchParams.get("platform") || undefined;
+      if (!startDate || !endDateExclusive) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "startDate and endDateExclusive must be valid YYYY-MM-DD dates." }));
+        return;
+      }
+      const startMs = Date.parse(`${startDate}T00:00:00.000Z`);
+      const endMs = Date.parse(`${endDateExclusive}T00:00:00.000Z`);
+      const rangeDays = (endMs - startMs) / 86_400_000;
+      if (rangeDays <= 0 || rangeDays > MAX_METRICS_SYNC_DAYS) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: `Metrics sync range must be between 1 and ${MAX_METRICS_SYNC_DAYS} days.` }));
+        return;
+      }
+      if (platform && !METRICS_SYNC_PLATFORMS.has(platform)) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "platform must be one of ig, th, fb, or yt." }));
+        return;
+      }
+
       // Build metric providers for each platform
       const providers = new Map<string, any>();
 
@@ -234,14 +266,12 @@ const server = http.createServer(async (req, res) => {
         logWarn("Facebook credentials not configured — Facebook metrics will be skipped");
       }
 
-      if (providers.size === 0) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "No platform credentials configured for metrics sync" }));
-        return;
-      }
-
       const service = new SyncMetricsService(providers, 5);
-      const report = await service.syncAll();
+      const report = await service.syncAll({
+        startDate,
+        endDateExclusive,
+        platform: platform as "ig" | "th" | "fb" | "yt" | undefined,
+      });
 
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify(report));
@@ -253,7 +283,7 @@ const server = http.createServer(async (req, res) => {
     } catch (err: any) {
       logError("Metrics sync endpoint failed", { error: err.message });
       res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: err.message }));
+      res.end(JSON.stringify({ error: "Metrics synchronization could not be completed." }));
     }
     return;
   }

@@ -9,6 +9,7 @@ export type {
   FetchedMetrics,
   PlatformSyncResult,
   SyncReport,
+  MetricsSyncScope,
 } from "./interface";
 export { InstagramMetricsProvider } from "./providers/instagram";
 export { ThreadsMetricsProvider } from "./providers/threads";

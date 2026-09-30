@@ -71,6 +71,7 @@ interface PostContextType {
   deletePost: (id: string) => Promise<void>;
   bulkAddPosts: (posts: NewPost[]) => Promise<Post[]>;
   movePost: (id: string, newDate: string) => Promise<void>;
+  refreshPosts: () => Promise<void>;
   clearPosts: () => void;
   toggleSelect: (id: string) => void;
   setSelectedPosts: (posts: Record<string, boolean>) => void;
@@ -88,7 +89,14 @@ const PostContext = createContext<PostContextType | null>(null);
 function postReducer(state: PostState, action: PostAction): PostState {
   switch (action.type) {
     case "SET_POSTS":
-      return { ...state, posts: action.payload, loading: false };
+      return {
+        ...state,
+        posts: action.payload,
+        selectedPosts: Object.fromEntries(
+          Object.entries(state.selectedPosts).filter(([id]) => action.payload.some((post) => post.id === id))
+        ),
+        loading: false,
+      };
 
     case "ADD_POST":
       return { ...state, posts: [...state.posts, action.payload] };
@@ -180,27 +188,29 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
     historyIndex: 0,
   });
 
-  // Load from Supabase on mount
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      dispatch({ type: "SET_LOADING", payload: true });
-      try {
-        const loaded = await fetchPosts();
-        if (!cancelled) {
-          dispatch({ type: "SET_POSTS", payload: loaded });
-          dispatch({ type: "PUSH_SNAPSHOT" });
-        }
-      } catch (err: any) {
-        if (!cancelled) {
-          dispatch({ type: "SET_ERROR", payload: formatSupabaseError(err) });
-          dispatch({ type: "SET_LOADING", payload: false });
-        }
-      }
+  const loadPosts = useCallback(async (showLoading: boolean) => {
+    if (showLoading) dispatch({ type: "SET_LOADING", payload: true });
+    dispatch({ type: "SET_ERROR", payload: null });
+    try {
+      const loaded = await fetchPosts();
+      dispatch({ type: "SET_POSTS", payload: loaded });
+    } catch (err: any) {
+      dispatch({ type: "SET_ERROR", payload: formatSupabaseError(err) });
+      if (showLoading) dispatch({ type: "SET_LOADING", payload: false });
+      throw err;
     }
-    load();
-    return () => { cancelled = true; };
   }, []);
+
+  // Initial load and later authoritative refreshes share the same fetch path.
+  useEffect(() => {
+    loadPosts(true)
+      .then(() => dispatch({ type: "PUSH_SNAPSHOT" }))
+      .catch(() => undefined);
+  }, [loadPosts]);
+
+  const refreshPosts = useCallback(async () => {
+    await loadPosts(false);
+  }, [loadPosts]);
 
   // Action wrappers — all go through Supabase
   const finalizeNativePost = useCallback(async (post: Post, notify = true): Promise<AddPostDetailedResult> => {
@@ -317,7 +327,7 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
     <PostContext.Provider value={{
       state, posts: state.posts, dispatch,
       addPost, addPostDetailed, updatePost: updatePostFn, deletePost: deletePostFn,
-      bulkAddPosts: bulkAddPostsFn, movePost: movePostFn,
+      bulkAddPosts: bulkAddPostsFn, movePost: movePostFn, refreshPosts,
       clearPosts: () => dispatch({ type: "CLEAR_POSTS" }),
       toggleSelect,
       setSelectedPosts,
