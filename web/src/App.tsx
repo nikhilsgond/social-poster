@@ -10,10 +10,10 @@ import { PlatformIcon, platformDataMap } from "./components/common/PlatformIcon"
 import { Calendar } from "./components/Calendar/Calendar";
 import { Tables, getFilteredSortedPosts } from "./components/Tables/Tables";
 import { Metrics } from "./components/Metrics/Metrics";
-import { PostModal } from "./components/Post/PostModal";
+import { CreatePostWorkflow } from "./components/CreatePost/CreatePostWorkflow";
 import { BulkImportModal } from "./components/BulkImport/BulkImportModal";
 import { ReuseSchedulerModal } from "./components/ReuseScheduler/ReuseSchedulerModal";
-import { CONTENT_TYPES } from "./lib/contentTypes";
+import { CONTENT_TYPES, isPublishingPlatform } from "./lib/contentTypes";
 import { parseImportedPosts } from "./lib/validation";
 import type { Platform, Post, PostStatus, MetricSnapshot, DateRange, DateRangeType } from "./types/post";
 import { useDateRange, useSnapshots, useEnrichedPosts } from "./hooks/usePosts";
@@ -81,7 +81,7 @@ function syncUrlState(state: Record<string, string | number | boolean | undefine
 // ── Main App Content ──
 function AppContent() {
   const { showToast } = useToast();
-  const { state, dispatch, addPost, updatePost, deletePost, bulkAddPosts, movePost, undo, redo, canUndo, canRedo, setEditPost } = usePostContext();
+  const { state, dispatch, addPost, addPostDetailed, updatePost, deletePost, bulkAddPosts, movePost, undo, redo, canUndo, canRedo, setEditPost } = usePostContext();
   const { posts, selectedPosts, editPostId, loading, error } = state;
 
   // ── View state ──
@@ -146,6 +146,7 @@ function AppContent() {
   const [modalCaption, setModalCaption] = useState("");
   const [modalMediaUrl, setModalMediaUrl] = useState("");
   const [modalStatus, setModalStatus] = useState<PostStatus>("scheduled");
+  const [createProcessing, setCreateProcessing] = useState(false);
 
   // ── Modal analytics toggle ──
   const [showAnalytics, setShowAnalytics] = useState(false);
@@ -230,6 +231,7 @@ function AppContent() {
     setModalCaption("");
     setModalMediaUrl("");
     setModalStatus("scheduled");
+    setCreateProcessing(false);
   }, []);
 
   // ── Open Edit Modal ──
@@ -275,6 +277,7 @@ function AppContent() {
     setShowAnalytics(false);
     setImportPreview(null);
     setImportConfirmed(false);
+    setCreateProcessing(false);
   }, []);
 
   // ── Save Post (Add or Edit) ──
@@ -500,7 +503,7 @@ function AppContent() {
       if (e.key === "Escape") {
         if (selectionMode) { exitDeleteMode(); }
         else if (reuseOpen) { closeReuseScheduler(); }
-        else if (modalOpen) { closeModal(); }
+        else if (modalOpen && !createProcessing) { closeModal(); }
         return;
       }
       if (!isModal) {
@@ -515,7 +518,7 @@ function AppContent() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [modalOpen, bulkImportOpen, reuseOpen, selectionMode, view, undo, redo, navMonth, goToday, exitDeleteMode, closeModal, closeReuseScheduler]);
+  }, [modalOpen, bulkImportOpen, reuseOpen, selectionMode, view, undo, redo, navMonth, goToday, exitDeleteMode, closeModal, closeReuseScheduler, createProcessing]);
 
   // ── Content type options ──
   const contentTypeOptions = CONTENT_TYPES[modalPlatform] || [];
@@ -571,7 +574,7 @@ function AppContent() {
             Bulk Import JSON
           </button>
           <button className="btn-primary" type="button" onClick={() => openAddModal()}>
-            Add Post
+            Create Post
           </button>
         </div>
 
@@ -590,7 +593,7 @@ function AppContent() {
           {view === "calendar" && !loading && (
             <>
               {posts.length === 0 && (
-                <div className="hint-bar">Nothing planned yet. Click Add Post, or click any day to add one there.</div>
+                <div className="hint-bar">Nothing planned yet. Click Create Post, or click any day to add one there.</div>
               )}
               <Calendar
                 year={currentMonth.year}
@@ -669,7 +672,17 @@ function AppContent() {
       </main>
 
       {/* ── Add/Edit Post Modal ── */}
-      {modalOpen && (
+      {modalOpen && !editPostId && (
+        <CreatePostWorkflow
+          posts={posts}
+          initialDate={modalPreset?.date}
+          initialPlatform={modalPreset?.platform && isPublishingPlatform(modalPreset.platform) ? modalPreset.platform : undefined}
+          onCreate={addPostDetailed}
+          onClose={closeModal}
+          onProcessingChange={setCreateProcessing}
+        />
+      )}
+      {modalOpen && editPostId && (
         <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}>
           <div className="panel">
             <h3>{editPostId ? "Edit Post" : "Add Post"}</h3>

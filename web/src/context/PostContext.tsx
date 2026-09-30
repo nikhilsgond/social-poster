@@ -19,7 +19,14 @@ import type { Post } from "../types/post";
 import { useToast } from "../components/common/Toast";
 import { NativeSubmissionError, submitNativePost } from "../lib/backend";
 
-type NewPost = Omit<Post, "id" | "createdAt" | "updatedAt">;
+export type NewPost = Omit<Post, "id" | "createdAt" | "updatedAt">;
+
+export interface AddPostDetailedResult {
+  post: Post;
+  nativeAttempted: boolean;
+  nativeSucceeded: boolean;
+  error?: string;
+}
 
 // ── Actions ──
 
@@ -59,6 +66,7 @@ interface PostContextType {
   posts: Post[];
   dispatch: React.Dispatch<PostAction>;
   addPost: (post: NewPost) => Promise<void>;
+  addPostDetailed: (post: NewPost) => Promise<AddPostDetailedResult>;
   updatePost: (id: string, changes: Partial<Post>) => Promise<void>;
   deletePost: (id: string) => Promise<void>;
   bulkAddPosts: (posts: NewPost[]) => Promise<Post[]>;
@@ -195,10 +203,12 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Action wrappers — all go through Supabase
-  const finalizeNativePost = useCallback(async (post: Post): Promise<Post> => {
-    if (post.status !== "scheduled" || (post.platform !== "fb" && post.platform !== "yt")) return post;
+  const finalizeNativePost = useCallback(async (post: Post, notify = true): Promise<AddPostDetailedResult> => {
+    if (post.status !== "scheduled" || (post.platform !== "fb" && post.platform !== "yt")) {
+      return { post, nativeAttempted: false, nativeSucceeded: true };
+    }
     try {
-      return await submitNativePost(post);
+      return { post: await submitNativePost(post), nativeAttempted: true, nativeSucceeded: true };
     } catch (err: any) {
       // The backend owns the definitive status. Re-read it so an uncertain
       // browser/network response never overwrites platform IDs or lifecycle data.
@@ -206,22 +216,29 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
       if (err instanceof NativeSubmissionError && err.canMarkFailed && refreshed?.status === "scheduled" && !refreshed.platformPostId) {
         refreshed = await updatePost(post.id, { status: "failed", errorMessage: err.message }).catch(() => refreshed);
       }
-      showToast("Native scheduling needs attention", err?.message || "The backend did not accept the post.", "error");
-      return refreshed || post;
+      const message = err?.message || "The backend did not accept the post.";
+      if (notify) showToast("Native scheduling needs attention", message, "error");
+      return { post: refreshed || post, nativeAttempted: true, nativeSucceeded: false, error: message };
     }
   }, [showToast]);
 
+  const addPostDetailed = useCallback(async (postData: NewPost): Promise<AddPostDetailedResult> => {
+    dispatch({ type: "PUSH_SNAPSHOT" });
+    const newPost = await createPost(postData);
+    const result = await finalizeNativePost(newPost, false);
+    dispatch({ type: "ADD_POST", payload: result.post });
+    return result;
+  }, [finalizeNativePost]);
+
   const addPost = useCallback(async (postData: NewPost) => {
     try {
-      dispatch({ type: "PUSH_SNAPSHOT" });
-      const newPost = await createPost(postData);
-      const finalizedPost = await finalizeNativePost(newPost);
-      dispatch({ type: "ADD_POST", payload: finalizedPost });
-      showToast("Post added", "New post has been added.", "success");
+      const result = await addPostDetailed(postData);
+      if (result.nativeSucceeded) showToast("Post added", "New post has been added.", "success");
+      else showToast("Native scheduling needs attention", result.error || "The backend did not accept the post.", "error");
     } catch (err: any) {
       showToast("Error", formatSupabaseError(err), "error");
     }
-  }, [finalizeNativePost, showToast]);
+  }, [addPostDetailed, showToast]);
 
   const updatePostFn = useCallback(async (id: string, changes: Partial<Post>) => {
     try {
@@ -253,7 +270,7 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
       const created = await createPosts(posts);
       const finalized: Post[] = [];
       for (const post of created) {
-        finalized.push(await finalizeNativePost(post));
+        finalized.push((await finalizeNativePost(post)).post);
       }
       if (finalized.length) {
         dispatch({ type: "BULK_ADD_POSTS", payload: finalized });
@@ -299,7 +316,7 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
   return (
     <PostContext.Provider value={{
       state, posts: state.posts, dispatch,
-      addPost, updatePost: updatePostFn, deletePost: deletePostFn,
+      addPost, addPostDetailed, updatePost: updatePostFn, deletePost: deletePostFn,
       bulkAddPosts: bulkAddPostsFn, movePost: movePostFn,
       clearPosts: () => dispatch({ type: "CLEAR_POSTS" }),
       toggleSelect,
