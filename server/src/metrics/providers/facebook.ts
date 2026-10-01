@@ -143,6 +143,111 @@ function isFacebookVideoContentType(contentType: string | undefined): boolean {
   return upper.includes("VIDEO") || upper === "REEL";
 }
 
+interface FacebookAttachment {
+  type?: unknown;
+  media_type?: unknown;
+  media?: unknown;
+  url?: unknown;
+  subattachments?: { data?: unknown[] };
+}
+
+interface FacebookDiscoveryItem {
+  message?: unknown;
+  full_picture?: unknown;
+  attachments?: { data?: unknown[] };
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function usableUrl(value: unknown): string | undefined {
+  const url = stringValue(value);
+  return /^https?:\/\//i.test(url) ? url : undefined;
+}
+
+function mediaObject(attachment: FacebookAttachment): Record<string, any> {
+  return attachment.media && typeof attachment.media === "object"
+    ? attachment.media as Record<string, any>
+    : {};
+}
+
+function flattenFacebookAttachments(data: unknown[] | undefined): FacebookAttachment[] {
+  const flattened: FacebookAttachment[] = [];
+  for (const value of data || []) {
+    if (!value || typeof value !== "object") continue;
+    const attachment = value as FacebookAttachment;
+    flattened.push(attachment);
+    flattened.push(...flattenFacebookAttachments(attachment.subattachments?.data));
+  }
+  return flattened;
+}
+
+function attachmentMetadata(attachment: FacebookAttachment): string {
+  const media = mediaObject(attachment);
+  return [attachment.type, attachment.media_type, media.type, media.media_type]
+    .map(stringValue)
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function isReelAttachment(attachment: FacebookAttachment): boolean {
+  const metadata = attachmentMetadata(attachment);
+  const url = stringValue(attachment.url);
+  const source = stringValue(mediaObject(attachment).source);
+  return /(?:^|[^a-z])reels?(?:[^a-z]|$)/i.test(metadata) || /\/(?:reel|reels)\//i.test(`${url} ${source}`);
+}
+
+function isVideoAttachment(attachment: FacebookAttachment): boolean {
+  const media = mediaObject(attachment);
+  const metadata = attachmentMetadata(attachment);
+  const url = stringValue(attachment.url);
+  const source = stringValue(media.source);
+  return /(?:^|[^a-z])video(?:[^a-z]|$)/i.test(metadata)
+    || Boolean(source)
+    || /\/(?:video|videos)\//i.test(url)
+    || /\.(?:mp4|mov|m4v|webm)(?:[?#]|$)/i.test(url);
+}
+
+function isImageAttachment(attachment: FacebookAttachment): boolean {
+  const media = mediaObject(attachment);
+  const metadata = attachmentMetadata(attachment);
+  const mediaString = stringValue(attachment.media);
+  const url = stringValue(attachment.url);
+  return /(?:^|[^a-z])(?:photo|image|picture)(?:[^a-z]|$)/i.test(metadata)
+    || Boolean(usableUrl(media.image?.src))
+    || /\.(?:jpe?g|png|gif|webp|avif)(?:[?#]|$)/i.test(`${mediaString} ${url}`);
+}
+
+export function classifyFacebookContentType(item: FacebookDiscoveryItem): "Reel" | "Video" | "Multiple Images" | "Image" | "Text" {
+  const attachments = flattenFacebookAttachments(item.attachments?.data);
+  if (attachments.some(isReelAttachment)) return "Reel";
+  if (attachments.some(isVideoAttachment)) return "Video";
+
+  const imageCount = attachments.filter((attachment) =>
+    !(attachment.subattachments?.data?.length) && isImageAttachment(attachment)
+  ).length;
+  if (imageCount >= 2) return "Multiple Images";
+  if (imageCount === 1 || usableUrl(item.full_picture)) return "Image";
+  return "Text";
+}
+
+function facebookMediaUrl(item: FacebookDiscoveryItem): string | undefined {
+  const fullPicture = usableUrl(item.full_picture);
+  if (fullPicture) return fullPicture;
+
+  for (const attachment of flattenFacebookAttachments(item.attachments?.data)) {
+    const media = mediaObject(attachment);
+    const candidate = usableUrl(media.image?.src)
+      || usableUrl(media.source)
+      || usableUrl(attachment.media)
+      || usableUrl(attachment.url);
+    if (candidate) return candidate;
+  }
+  return undefined;
+}
+
 export class FacebookMetricsProvider implements MetricProvider {
   private pageAccessToken: string;
   private pageId: string;
@@ -158,7 +263,7 @@ export class FacebookMetricsProvider implements MetricProvider {
 
   async discoverPosts(scope: MetricsSyncScope, onBatch?: (posts: DiscoveredPost[]) => Promise<void>): Promise<DiscoveryResult> {
     const params = new URLSearchParams({
-      fields: "id,message,created_time,permalink_url,full_picture,attachments{media_type,type},shares,comments.limit(0).summary(true),reactions.type(LIKE).limit(0).summary(true)",
+      fields: "id,message,created_time,permalink_url,full_picture,attachments{media_type,type,media,url,subattachments{media_type,type,media,url}},shares,comments.limit(0).summary(true),reactions.type(LIKE).limit(0).summary(true)",
       limit: "100",
       access_token: this.pageAccessToken,
     });
@@ -188,15 +293,13 @@ export class FacebookMetricsProvider implements MetricProvider {
           if (!item.id || !item.created_time) continue;
           if (isOlderThanScope(item.created_time, scope)) reachedOlder = true;
           if (!inScope(item.created_time, scope)) continue;
-          const attachment = item.attachments?.data?.[0];
-          const type = String(attachment?.media_type || attachment?.type || "status").toLowerCase();
           pagePosts.push({
             platform: "fb",
             platformPostId: String(item.id),
             publishedAt: new Date(item.created_time).toISOString(),
-            contentType: type.includes("video") ? "Video" : type.includes("photo") || type.includes("image") ? "Image" : type.includes("link") ? "Link" : "Text",
+            contentType: classifyFacebookContentType(item),
             content: item.message || undefined,
-            mediaUrl: item.full_picture || undefined,
+            mediaUrl: facebookMediaUrl(item),
             permalink: item.permalink_url || undefined,
             metrics: {
               likes: numberMetric(item.reactions?.summary?.total_count),
