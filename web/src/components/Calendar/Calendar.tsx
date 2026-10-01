@@ -328,12 +328,14 @@ export const Calendar: React.FC<CalendarProps> = ({
           {monthSync.running ? "Syncing…" : "Sync"}
         </button>
       </div>
-      <div className="cal-weekdays" aria-hidden="true">
-        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((weekday) => (
-          <div className="cal-weekday" key={weekday}>{weekday}</div>
-        ))}
+      <div className="cal-scroll">
+        <div className="cal-weekdays" aria-hidden="true">
+          {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((weekday) => (
+            <div className="cal-weekday" key={weekday}>{weekday}</div>
+          ))}
+        </div>
+        <div className="cal-grid">{cells}</div>
       </div>
-      <div className="cal-grid">{cells}</div>
 
       {preview && (
         <div

@@ -4,7 +4,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { usePostContext } from "../context/PostContext";
 import type { Platform, Post, MetricSnapshot, DateRange } from "../types/post";
-import { metricSummary, metricNumber, formatMetric, escapeHtml, prettyDateShort, relativeTime, filterPostsByDateRange, snapshotSummary, latestSnapshotsByPost, snapshotTrendData, snapshotPlatformStats, enrichPostsWithSnapshots, latestSnapshot, formatTimestamp, DATE_RANGE_OPTIONS, } from "../lib/metrics";
+import { metricSummary, metricNumber, formatMetric, escapeHtml, prettyDateShort, relativeTime, filterPostsByDateRange, snapshotSummary, latestSnapshotsByPost, snapshotPlatformStats, enrichPostsWithSnapshots, latestSnapshot, formatTimestamp, DATE_RANGE_OPTIONS, } from "../lib/metrics";
 import { computeDateRange } from "../lib/supabasePosts";
 import { fetchSnapshots, fetchPostSnapshots } from "../lib/supabasePosts";
 import type { DateRangeType } from "../types/post";
@@ -145,11 +145,6 @@ export function useSnapshots(dateRange?: DateRange) {
 
   const platformStats = useMemo(() => snapshotPlatformStats(snapshots), [snapshots]);
 
-  const trendViews = useMemo(() => snapshotTrendData(snapshots, "views"), [snapshots]);
-  const trendLikes = useMemo(() => snapshotTrendData(snapshots, "likes"), [snapshots]);
-  const trendComments = useMemo(() => snapshotTrendData(snapshots, "comments"), [snapshots]);
-  const trendShares = useMemo(() => snapshotTrendData(snapshots, "shares"), [snapshots]);
-
   return {
     snapshots,
     loading,
@@ -158,10 +153,6 @@ export function useSnapshots(dateRange?: DateRange) {
     latestMap,
     summary,
     platformStats,
-    trendViews,
-    trendLikes,
-    trendComments,
-    trendShares,
   };
 }
 

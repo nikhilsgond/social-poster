@@ -225,21 +225,6 @@ export function latestSnapshotsByPost(snapshots: MetricSnapshot[]): Map<string, 
   return map;
 }
 
-// ── Snapshot Trend Data (group by captured_at date) ──
-export interface TrendData { dates: string[]; values: number[] }
-
-export function snapshotTrendData(snapshots: MetricSnapshot[], metric: "views" | "likes" | "comments" | "shares"): TrendData {
-  const byDate: Record<string, number> = {};
-  snapshots.forEach((s) => {
-    if (!s.capturedAt) return;
-    const day = new Date(s.capturedAt).toISOString().split("T")[0];
-    byDate[day] = (byDate[day] || 0) + (s[metric] || 0);
-  });
-  const dates = Object.keys(byDate).sort();
-  const values = dates.map((d) => byDate[d]);
-  return { dates, values };
-}
-
 // ── Snapshot Platform Stats ──
 export interface SnapshotPlatformStat {
   key: Platform;

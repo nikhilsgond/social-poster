@@ -1,7 +1,7 @@
 // src/components/Metrics/Metrics.tsx
 // Phase 3 Analytics Dashboard — extends the existing Metrics component.
 // Reuses the existing design system: dark theme cards, platform icons, bar charts, donut charts.
-// Adds: date range filtering, snapshot-based historical trends, shares KPI,
+// Adds: date range filtering, shares KPI,
 // multi-metric top posts, individual post analytics.
 
 import React from "react";
@@ -11,62 +11,12 @@ import type { Post, Platform, MetricSnapshot, DateRange, DateRangeType } from ".
 import {
   metricSummary, metricNumber, formatMetric, escapeHtml, prettyDateShort, relativeTime,
   filterPostsByDateRange, snapshotSummary as getSnapshotSummary, latestSnapshotsByPost,
-  snapshotTrendData, snapshotPlatformStats as getSnapshotPlatformStats, latestSnapshot, formatTimestamp,
+  snapshotPlatformStats as getSnapshotPlatformStats, latestSnapshot, formatTimestamp,
   DATE_RANGE_OPTIONS, METRIC_OPTIONS,
 } from "../../lib/metrics";
-import type { SnapshotSummary, SnapshotPlatformStat, TrendData } from "../../lib/metrics";
+import type { SnapshotSummary, SnapshotPlatformStat } from "../../lib/metrics";
 
 const PLATFORMS = ["yt", "ig", "fb", "th", "li", "x"] as Platform[];
-
-// ── SVG Line Trend Chart ──
-function LineTrendChart({ dates, values, title, subtitle, metricLabel }: {
-  dates: string[]; values: number[]; title: string; subtitle: string; metricLabel: string;
-}) {
-  if (!dates.length) return (
-    <div className="chart-card">
-      <h3>{escapeHtml(title)}</h3>
-      <div className="chart-subtitle">{escapeHtml(subtitle)}</div>
-      <div className="empty-metrics">No {escapeHtml(metricLabel)} data yet in this range.</div>
-    </div>
-  );
-  const max = Math.max(1, Math.max.apply(null, values));
-  const W = 760, H = 220, L = 34, R = 16, T = 18, B = 40;
-  const innerW = W - L - R, innerH = H - T - B;
-  const points = values.map((v, i) => {
-    const x = L + (dates.length === 1 ? innerW / 2 : i * (innerW / (dates.length - 1)));
-    const y = T + innerH - (v / max * innerH);
-    return [x, y];
-  });
-  const poly = points.map((pt) => `${pt[0].toFixed(1)},${pt[1].toFixed(1)}`).join(" ");
-  const grids = [0, 0.25, 0.5, 0.75, 1].map((r) => {
-    const y = T + innerH * r;
-    return <line key={r} x1={L} x2={W - R} y1={y} y2={y} className="trend-grid" />;
-  });
-  const labels: React.ReactNode[] = [];
-  [0, Math.floor((dates.length - 1) / 2), dates.length - 1].forEach((i) => {
-    if (i < 0 || i >= dates.length || labels.some((l) => l && (l as any).key === i)) return;
-    const pt = points[i];
-    labels.push(<text key={i} x={pt[0]} y={H - 9} textAnchor="middle" className="trend-label">{escapeHtml(prettyDateShort(dates[i]))}</text>);
-  });
-  const dots = points.map((pt, i) => <circle key={i} cx={pt[0]} cy={pt[1]} r="3" className="trend-dot" />);
-  const yAxis = [0, 0.25, 0.5, 0.75, 1].map((r) => {
-    const y = T + innerH * r;
-    const val = max * (1 - r);
-    return <text key={r} x={L - 6} y={y + 4} textAnchor="end" className="trend-label" style={{ fontSize: 9 }}>{formatMetric(val)}</text>;
-  });
-  return (
-    <div className="chart-card">
-      <h3>{escapeHtml(title)}</h3>
-      <div className="chart-subtitle">{escapeHtml(subtitle)} — using snapshot <code>captured_at</code></div>
-      <div className="trend-wrap">
-        <svg viewBox={`0 0 ${W} ${H}`} className="trend-svg" role="img" aria-label={metricLabel + " over time"}>
-          {grids}{yAxis}
-          <polyline points={poly} className="trend-line" />{dots}{labels}
-        </svg>
-      </div>
-    </div>
-  );
-}
 
 // ── KPI Cards (with shares from snapshots) ──
 function KPICards({ summary, snapshotSummary }: {
@@ -266,10 +216,8 @@ function platformMetricsSummary(latest: MetricSnapshot | null) {
 // ── Render Overview ──
 function renderMetricsOverview(
   pool: Post[],
-  snapshots: MetricSnapshot[],
   snapshotSum: SnapshotSummary | null,
   snapPlatformStats: SnapshotPlatformStat[],
-  trendData: { trendViews: TrendData; trendLikes: TrendData; trendComments: TrendData; trendShares: TrendData },
   topPostsMetric: string,
   onTopPostsMetricChange: (m: string) => void,
 ) {
@@ -284,28 +232,6 @@ function renderMetricsOverview(
   return (
     <>
       <KPICards summary={summary} snapshotSummary={snapshotSum || null} />
-
-      {/* Historical Trends from Snapshots */}
-      <div className="chart-card">
-        <h3>Historical metric trends</h3>
-        <div className="chart-subtitle">Based on snapshot capture dates (not publication dates)</div>
-        {snapshots.length === 0 ? (
-          <div className="empty-metrics">No snapshot data yet. Run a metrics sync to populate historical trends.</div>
-        ) : (
-          <div className="metrics-grid equal">
-            <div className="chart-card" style={{ background: "var(--panel-alt)" }}><h4>Views</h4>{formatMetric(trendData.trendViews.values.reduce((a, b) => a + b, 0))} total captured</div>
-            <div className="chart-card" style={{ background: "var(--panel-alt)" }}><h4>Likes</h4>{formatMetric(trendData.trendLikes.values.reduce((a, b) => a + b, 0))} total captured</div>
-            <div className="chart-card" style={{ background: "var(--panel-alt)" }}><h4>Comments</h4>{formatMetric(trendData.trendComments.values.reduce((a, b) => a + b, 0))} total captured</div>
-            <div className="chart-card" style={{ background: "var(--panel-alt)" }}><h4>Shares</h4>{formatMetric(trendData.trendShares.values.reduce((a, b) => a + b, 0))} total captured</div>
-          </div>
-        )}
-      </div>
-
-      {/* Snapshot Trend Line Charts */}
-      <LineTrendChart dates={trendData.trendViews.dates} values={trendData.trendViews.values} title="Views over time" subtitle="Daily total views from snapshots" metricLabel="views" />
-      <LineTrendChart dates={trendData.trendLikes.dates} values={trendData.trendLikes.values} title="Likes over time" subtitle="Daily total likes from snapshots" metricLabel="likes" />
-      <LineTrendChart dates={trendData.trendComments.dates} values={trendData.trendComments.values} title="Comments over time" subtitle="Daily total comments from snapshots" metricLabel="comments" />
-      <LineTrendChart dates={trendData.trendShares.dates} values={trendData.trendShares.values} title="Shares over time" subtitle="Daily total shares from snapshots" metricLabel="shares" />
 
       {/* Platform Comparison from snapshots */}
       <div className="metrics-grid">
@@ -339,8 +265,6 @@ function renderMetricsOverview(
 function renderMetricsPlatform(
   key: string,
   pool: Post[],
-  snapshots: MetricSnapshot[],
-  snapPlatformStats: SnapshotPlatformStat[],
   topPostsMetric: string,
   onTopPostsMetricChange: (m: string) => void,
   platformSnapshots: MetricSnapshot[],
@@ -355,10 +279,6 @@ function renderMetricsPlatform(
   const engItems = Object.keys(engagementByType).map((t) => { const x = engagementByType[t]; return { label: t, value: x.views ? ((x.likes + x.comments) / x.views * 100) : 0 }; }).sort((a, b) => b.value - a.value).slice(0, 8);
   const maxEng = Math.max(1, Math.max.apply(null, engItems.map((x) => x.value)));
   const engChart = engItems.length ? <div className="metric-chart-bars">{engItems.map((x) => <div key={x.label} className="metric-bar-row"><div className="metric-bar-label"><span>{escapeHtml(x.label)}</span></div><div className="metric-bar-track"><div className="metric-bar-fill" style={{ width: `${x.value / maxEng * 100}%`, background: pl.shade }} /></div><div className="metric-bar-value">{x.value.toFixed(2)}%</div></div>)}</div> : <div className="empty-metrics">No engagement data yet.</div>;
-
-  // Platform-specific trend from snapshots
-  const platformTrendViews = snapshotTrendData(platformSnapshots, "views");
-  const platformTrendLikes = snapshotTrendData(platformSnapshots, "likes");
 
   return (
     <>
@@ -388,10 +308,6 @@ function renderMetricsPlatform(
         <div className="chart-subtitle">From latest snapshot's <code>platform_metrics</code> JSON</div>
         {platformMetricsSummary(latestSnap)}
       </div>
-
-      {/* Platform historical trend charts */}
-      <LineTrendChart dates={platformTrendViews.dates} values={platformTrendViews.values} title={`${pl.name} views trend`} subtitle="Daily views from snapshots" metricLabel="views" />
-      <LineTrendChart dates={platformTrendLikes.dates} values={platformTrendLikes.values} title={`${pl.name} likes trend`} subtitle="Daily likes from snapshots" metricLabel="likes" />
 
       <div className="metrics-grid">
         <div className="chart-card"><h3>Views trend</h3><div className="chart-subtitle">Recorded views by upload date</div>{viewsTrendChart(pool)}</div>
@@ -509,11 +425,6 @@ export const Metrics: React.FC<{
     () => getSnapshotPlatformStats(rangedSnapshots),
     [rangedSnapshots]
   );
-  const activeTrendViews = React.useMemo(() => snapshotTrendData(rangedSnapshots, "views"), [rangedSnapshots]);
-  const activeTrendLikes = React.useMemo(() => snapshotTrendData(rangedSnapshots, "likes"), [rangedSnapshots]);
-  const activeTrendComments = React.useMemo(() => snapshotTrendData(rangedSnapshots, "comments"), [rangedSnapshots]);
-  const activeTrendShares = React.useMemo(() => snapshotTrendData(rangedSnapshots, "shares"), [rangedSnapshots]);
-
   // Top posts sort metric state
   const [topPostsMetric, setTopPostsMetric] = React.useState("views");
 
@@ -567,13 +478,11 @@ export const Metrics: React.FC<{
 
       {metricsTab === "all"
         ? renderMetricsOverview(
-            rangedPool, rangedSnapshots, activeSnapshotSummary, activeSnapshotPlatformStats,
-            { trendViews: activeTrendViews, trendLikes: activeTrendLikes, trendComments: activeTrendComments, trendShares: activeTrendShares },
+            rangedPool, activeSnapshotSummary, activeSnapshotPlatformStats,
             topPostsMetric, setTopPostsMetric,
           )
         : renderMetricsPlatform(
-            metricsTab, rangedPool, rangedSnapshots, activeSnapshotPlatformStats,
-            topPostsMetric, setTopPostsMetric, platformSnapshots,
+            metricsTab, rangedPool, topPostsMetric, setTopPostsMetric, platformSnapshots,
           )}
     </div>
   );

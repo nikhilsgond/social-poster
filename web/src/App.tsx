@@ -18,8 +18,7 @@ import { ReuseSchedulerModal } from "./components/ReuseScheduler/ReuseSchedulerM
 import { CONTENT_TYPES, isPublishingPlatform } from "./lib/contentTypes";
 import type { Platform, Post, PostStatus, MetricSnapshot, DateRange, DateRangeType } from "./types/post";
 import { useDateRange, useSnapshots, useEnrichedPosts } from "./hooks/usePosts";
-import { formatTimestamp, snapshotTrendData, metricNumber, formatMetric, escapeHtml } from "./lib/metrics";
-import type { SnapshotSummary, SnapshotPlatformStat, TrendData } from "./lib/metrics";
+import { formatTimestamp, metricNumber, formatMetric, escapeHtml } from "./lib/metrics";
 import { syncMetrics } from "./lib/backend";
 import type { MetricsSyncPlatform } from "./lib/backend";
 import { exportRecordsToCSV, filterPostsForExport, toExportRecords } from "./lib/exportPosts";
@@ -913,7 +912,6 @@ function AppContent() {
                   if (!post) return null;
                   const latestSnap = latestMap.get(post.id);
                   const postSnapshots = snapshots.filter((s) => s.postId === post.id);
-                  const trend = snapshotTrendData(postSnapshots, "views");
                   const platformMetrics = latestSnap?.platformMetrics || {};
                   const pmEntries = Object.entries(platformMetrics);
                   return (
