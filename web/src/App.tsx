@@ -138,11 +138,15 @@ function AppContent() {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const localDate = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
-    const allHistory = request.preset === "all";
+    const syncAll = request.preset === "all";
     let start: Date | null = null;
     let end: Date | null = null;
-    let monthLabel = "All Available History";
-    if (request.preset === "custom") {
+    let monthLabel = "";
+    if (syncAll) {
+      start = new Date(2026, 0, 1);
+      end = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+      monthLabel = `Jan 1, 2026 – ${localDate(today)}`;
+    } else if (request.preset === "custom") {
       if (!request.startDate || !request.endDate || request.startDate > request.endDate) {
         showToast("Invalid sync range", "Choose a valid From and To date.", "warning");
         return;
@@ -151,7 +155,7 @@ function AppContent() {
       const selectedEnd = new Date(`${request.endDate}T00:00:00`);
       end = new Date(selectedEnd.getFullYear(), selectedEnd.getMonth(), selectedEnd.getDate() + 1);
       monthLabel = `${request.startDate} – ${request.endDate}`;
-    } else if (!allHistory) {
+    } else {
       const days = request.preset === "7d" ? 7 : request.preset === "30d" ? 30 : 90;
       start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (days - 1));
       end = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
@@ -179,7 +183,6 @@ function AppContent() {
           endTimeExclusive: end?.toISOString(),
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           platform,
-          allHistory,
         });
         const result = report.platforms[platform];
         const discovered = result?.discovered ?? report.summary.discovered;

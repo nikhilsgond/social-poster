@@ -11,6 +11,7 @@ import type {
   SyncReport,
 } from "./interface";
 import { mergeMetrics } from "./providers/shared";
+import { dedupeDiscoveredPosts } from "./identity";
 
 const PLATFORM_ORDER: MetricsSyncPlatform[] = ["ig", "th", "fb", "yt"];
 
@@ -200,15 +201,10 @@ export class SyncMetricsService {
           continue;
         }
 
-        const seenPlatformPostIds = new Set<string>();
+        const seenIdentities = new Set<string>();
         let stopForPlatformFailure = false;
         const processBatch = async (batch: DiscoveredPost[]) => {
-          const discovered = [...new Map(batch.map((post) => [post.platformPostId, post])).values()]
-            .filter((post) => {
-              if (seenPlatformPostIds.has(post.platformPostId)) return false;
-              seenPlatformPostIds.add(post.platformPostId);
-              return true;
-            });
+          const discovered = dedupeDiscoveredPosts(batch, seenIdentities);
           if (!discovered.length) return;
 
           result.discovered += discovered.length;
