@@ -6,9 +6,6 @@ A social media publishing/scheduling backend for a "Social Planner" React fronte
 
 ```
 social-poster/
-├── .github/
-│   └── workflows/
-│       └── publish.yml              # GitHub Actions — runs every 5 min, processes Threads + Instagram due posts
 ├── db/
 │   ├── metrics-snapshots.sql        # Phase 1: post_metric_snapshots table + upsert RPC
 │   ├── posts.sql                    # Posts table placeholder (created manually in Supabase)
@@ -23,7 +20,7 @@ social-poster/
 │   ├── src/
 │   │   ├── index.ts                 # HTTP server + routes
 │   │   ├── posts.ts                 # Post query/update functions (DB layer)
-│   │   ├── publish-runner.ts        # One-shot worker for GitHub Actions
+│   │   ├── due-post-worker.ts       # IG/Threads worker invoked by the authenticated HTTP route
 │   │   ├── test-mode.ts             # Test mode (dry-run publishing)
 │   │   ├── types/
 │   │   │   └── index.ts             # Shared types: Post, Platform, PostStatus
@@ -105,7 +102,7 @@ A React + TypeScript + Vite + Tailwind app. Connects to the same Supabase instan
 |--------|------|-------------|
 | GET | `/health` | Health check — returns `{ status: "ok" }` |
 | POST | `/test` | Test mode — runs publishers without modifying status |
-| GET | `/posts/due` | Returns due posts (scheduled + past scheduled_at) for GitHub Actions |
+| POST | `/posts/due` | Authenticated worker that claims and publishes due IG/Threads posts |
 | GET | `/posts/:id` | Returns a single post by UUID |
 | POST | `/publish/:id` | Immediate publish (only if scheduled_at is past) |
 | POST | `/schedule/:id` | Native future scheduling (YouTube/Facebook) |
@@ -131,9 +128,9 @@ Each publisher implements the `PlatformPublisher` interface (`publish(post)` →
 - **YouTube** (`publishers/youtube.ts`): OAuth2 refresh token flow. Uploads video as private with `publishAt` for native scheduling. Removed the early-return guard for future-dated posts (now uploads immediately with `publishAt=scheduledAt`).
 - **Facebook** (`publishers/facebook.ts`): Text/image/link posts with `published=false` + `scheduled_publish_time` for native scheduling.
 
-### Publish Runner (`server/src/publish-runner.ts`)
+### Due-post worker (`server/src/due-post-worker.ts`)
 
-One-shot worker used by GitHub Actions. Filters to Threads (`th`) + Instagram (`ig`) only. Run via `npm run publish` (`tsx src/publish-runner.ts`).
+Invoked through authenticated `POST /posts/due` by an external scheduler. It queries only due Threads (`th`) and Instagram (`ig`) rows, atomically claims each row, and uses the existing publishers.
 
 ## Phase 1: Metrics Synchronization
 
@@ -238,12 +235,6 @@ cd server && npm run dev
 ```bash
 cd server && npm run build
 # or: npx tsc
-```
-
-### Publish runner (GitHub Actions)
-```bash
-cd server && npm run publish
-# or: npx tsx src/publish-runner.ts
 ```
 
 ### Start the frontend

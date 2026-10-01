@@ -11,6 +11,7 @@
 // Access tokens are refreshed automatically when expired.
 
 import { OAuth2Client } from "google-auth-library";
+import { randomUUID } from "node:crypto";
 
 export interface YouTubeConfig {
   clientId: string;
@@ -44,6 +45,81 @@ export class YouTubeApiError extends Error {
     this.statusCode = statusCode;
     this.body = body;
   }
+}
+
+interface YouTubeErrorResponse {
+  error?: {
+    code?: number;
+    message?: string;
+    status?: string;
+    errors?: Array<{ reason?: string }>;
+  };
+}
+
+function sanitizeGoogleDiagnostic(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const sanitized = value.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
+  return sanitized ? sanitized.slice(0, 500) : null;
+}
+
+export function formatYouTubeApiFailure(
+  operation: string,
+  statusCode: number,
+  responseBody: string
+): string {
+  let parsed: YouTubeErrorResponse | null = null;
+  try {
+    parsed = JSON.parse(responseBody) as YouTubeErrorResponse;
+  } catch {
+    // Do not surface arbitrary non-JSON response bodies.
+  }
+
+  const googleError = parsed?.error;
+  const message = sanitizeGoogleDiagnostic(googleError?.message) || "Google API request failed";
+  const reason = sanitizeGoogleDiagnostic(googleError?.errors?.[0]?.reason)
+    || sanitizeGoogleDiagnostic(googleError?.status);
+  const diagnostic = reason ? `${message} [${reason}]` : message;
+  return `${operation} (${statusCode}): ${diagnostic}`;
+}
+
+export function resolveYouTubeMediaType(contentType: string | null): string {
+  const normalized = contentType?.split(";", 1)[0].trim().toLowerCase();
+  return normalized?.startsWith("video/") ? normalized : "application/octet-stream";
+}
+
+export function buildYouTubeVideoMetadata(
+  title: string,
+  description: string,
+  scheduledAt?: string
+) {
+  return {
+    snippet: {
+      title,
+      description,
+      tags: ["ctrlplusexcel", "api-test"],
+    },
+    status: {
+      privacyStatus: "private" as const,
+      publishAt: scheduledAt || undefined,
+    },
+  };
+}
+
+export function buildYouTubeMultipartBody(
+  metadata: ReturnType<typeof buildYouTubeVideoMetadata>,
+  videoBytes: Buffer,
+  mediaType: string,
+  boundary: string
+): Buffer {
+  return Buffer.concat([
+    Buffer.from(`--${boundary}\r\n`),
+    Buffer.from("Content-Type: application/json; charset=UTF-8\r\n\r\n"),
+    Buffer.from(JSON.stringify(metadata), "utf-8"),
+    Buffer.from(`\r\n--${boundary}\r\n`),
+    Buffer.from(`Content-Type: ${mediaType}\r\n\r\n`),
+    videoBytes,
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
 }
 
 // ── YouTube Graph API Client ──
@@ -99,7 +175,7 @@ export class YouTubeGraphClient {
     if (!response.ok) {
       const errorBody = await response.text();
       throw new YouTubeApiError(
-        `YouTube API error ${response.status}: ${errorBody}`,
+        formatYouTubeApiFailure("YouTube API request failed", response.status, errorBody),
         response.status,
         errorBody
       );
@@ -108,9 +184,9 @@ export class YouTubeGraphClient {
   }
 
   // ── Upload a video ──
-  // Uses the YouTube Data API v3 upload endpoint with multipart upload.
-  // For small files (< 5MB), uses simple upload.
-  // For larger files, would use resumable upload.
+  // Uses the YouTube Data API v3 upload endpoint with a single multipart upload.
+  // YouTube also supports resumable uploads, which are recommended for reliability
+  // with larger files but are not required by the videos.insert endpoint.
   //
   // status.privacyStatus = "private" — video is not publicly visible
   // status.publishAt = scheduled_at — YouTube publishes at this time
@@ -133,33 +209,10 @@ export class YouTubeGraphClient {
         }
         const videoBuffer = Buffer.from(await videoResponse.arrayBuffer());
 
-        const metadata = {
-          snippet: {
-            title,
-            description,
-            tags: ["ctrlplusexcel", "api-test"],
-          },
-          status: {
-            privacyStatus: "private" as const,
-            publishAt: scheduledAt || undefined,
-            selfMadeMadeForKids: false,
-          },
-        };
-
-        // Multipart upload for small files (< 5MB)
-        const boundary = "----YouTubeMultipartBoundaryXYZ";
-        const metadataBytes = Buffer.from(JSON.stringify(metadata), "utf-8");
-        const videoBytes = Buffer.from(videoBuffer);
-
-        const body = Buffer.concat([
-          Buffer.from(`--${boundary}\r\n`),
-          Buffer.from("Content-Type: application/json; charset=UTF-8\r\n\r\n"),
-          metadataBytes,
-          Buffer.from(`\r\n--${boundary}\r\n`),
-          Buffer.from("video/*\r\n\r\n"),
-          videoBytes,
-          Buffer.from(`\r\n--${boundary}--\r\n`),
-        ]);
+        const metadata = buildYouTubeVideoMetadata(title, description, scheduledAt);
+        const mediaType = resolveYouTubeMediaType(videoResponse.headers.get("content-type"));
+        const boundary = `youtube_${randomUUID().replaceAll("-", "")}`;
+        const body = buildYouTubeMultipartBody(metadata, videoBuffer, mediaType, boundary);
 
         const accessToken = await this.getAccessToken();
         const uploadUrl = `https://www.googleapis.com/upload/youtube/v3/videos?part=snippet,status&uploadType=multipart`;
@@ -169,14 +222,15 @@ export class YouTubeGraphClient {
           headers: {
             Authorization: `Bearer ${accessToken}`,
             "Content-Type": `multipart/related; boundary="${boundary}"`,
+            "Content-Length": String(body.byteLength),
           },
-          body,
+          body: new Uint8Array(body),
         });
 
         if (!uploadResponse.ok) {
           const errorBody = await uploadResponse.text();
           throw new YouTubeApiError(
-            `YouTube upload failed: ${uploadResponse.status}`,
+            formatYouTubeApiFailure("YouTube upload failed", uploadResponse.status, errorBody),
             uploadResponse.status,
             errorBody
           );

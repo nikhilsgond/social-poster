@@ -5,7 +5,6 @@
   "scripts": {
     "web": "npm --prefix web run dev",
     "web:build": "npm --prefix web run build",
-    "server": "npm --prefix server run dev",
-    "server:publish": "npm --prefix server run publish"
+    "server": "npm --prefix server run dev"
   }
 }

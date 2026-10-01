@@ -10,10 +10,11 @@ import { fileURLToPath } from "url";
 import { supabaseServer } from "./lib/supabase";
 import { logInfo, logError, logWarn } from "./lib/logger";
 import { runTestMode } from "./test-mode";
-import { claimDuePostForPublishing, claimPostForNativeScheduling, getDuePosts, getPostById, updatePublishingResult, updatePublishingError, updateSchedulingResult, updateMetrics } from "./posts";
+import { claimDuePostForPublishing, claimPostForNativeScheduling, getPostById, updatePublishingResult, updatePublishingError, updateSchedulingResult, updateMetrics } from "./posts";
 import { routePublisher } from "./platforms/router";
 import { SyncMetricsService, InstagramMetricsProvider, ThreadsMetricsProvider, YouTubeMetricsProvider, FacebookMetricsProvider } from "./metrics";
 import { applyCors, hasValidOwnerToken, rejectUnauthorized } from "./lib/http-security";
+import { runDuePostWorker } from "./due-post-worker";
 
 // Load environment variables from .env file
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -41,7 +42,7 @@ function validateConfig(): boolean {
 // ── HTTP Server ──
 
 const PORT = process.env.PORT || 3001;
-const HOST = process.env.HOST || "127.0.0.1";
+const HOST = process.env.HOST || "0.0.0.0";
 const METRICS_SYNC_PLATFORMS = new Set(["ig", "th", "fb", "yt"]);
 const MAX_METRICS_SYNC_DAYS = 366;
 
@@ -94,17 +95,17 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Get due posts
-  if (url.pathname === "/posts/due" && req.method === "GET") {
+  // Publish due Instagram/Threads posts. Intended for an authenticated
+  // external scheduler such as cron-job.org.
+  if (url.pathname === "/posts/due" && req.method === "POST") {
     try {
-      const posts = await getDuePosts();
+      const result = await runDuePostWorker();
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ posts }));
-      logInfo(`GET /posts/due returned ${posts.length} posts`);
+      res.end(JSON.stringify(result));
     } catch (err: any) {
-      logError("Failed to get due posts", { error: err.message });
+      logError("Due-post worker failed", { error: err.message });
       res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: err.message }));
+      res.end(JSON.stringify({ ok: false, error: "Due-post worker could not be completed" }));
     }
     return;
   }

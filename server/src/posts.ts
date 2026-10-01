@@ -5,7 +5,9 @@
 import { supabaseServer } from "./lib/supabase";
 import type { Post } from "./types";
 import { DatabaseError } from "./lib/errors";
-import { IMMEDIATE_PUBLISHING_PLATFORMS, NATIVE_SCHEDULING_PLATFORMS } from "./platform-capabilities";
+import { NATIVE_SCHEDULING_PLATFORMS } from "./platform-capabilities";
+
+const DUE_POST_WORKER_PLATFORMS = ["ig", "th"] as const;
 
 // ── Get due posts (scheduled and past their scheduled time) ──
 
@@ -16,6 +18,8 @@ export async function getDuePosts(): Promise<Post[]> {
       .from("posts")
       .select("*")
       .eq("status", "scheduled")
+      .in("platform", DUE_POST_WORKER_PLATFORMS)
+      .not("scheduled_at", "is", null)
       .lte("scheduled_at", now)
       .order("scheduled_at", { ascending: true });
 
@@ -54,7 +58,7 @@ export async function claimDuePostForPublishing(id: string): Promise<Post | null
       .update({ status: "publishing", updated_at: now, error_message: null })
       .eq("id", id)
       .eq("status", "scheduled")
-      .in("platform", IMMEDIATE_PUBLISHING_PLATFORMS)
+      .in("platform", DUE_POST_WORKER_PLATFORMS)
       .not("scheduled_at", "is", null)
       .lte("scheduled_at", now)
       .select()
