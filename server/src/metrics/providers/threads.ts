@@ -14,7 +14,7 @@
 // Part of Phase 1: Metrics Synchronization.
 
 import type { Post } from "../../types";
-import type { MetricProvider, MetricResult, FetchedMetrics, MetricsSyncScope, DiscoveryResult } from "../interface";
+import type { MetricProvider, MetricResult, FetchedMetrics, MetricsSyncScope, DiscoveryResult, DiscoveredPost } from "../interface";
 import { logInfo, logError } from "../../lib/logger";
 import { inScope, isOlderThanScope, looksLikePlatformAuthFailure, publicProviderError } from "./shared";
 
@@ -92,14 +92,16 @@ export class ThreadsMetricsProvider implements MetricProvider {
     return true; // Availability is determined at runtime in fetchMetrics
   }
 
-  async discoverPosts(scope: MetricsSyncScope): Promise<DiscoveryResult> {
+  async discoverPosts(scope: MetricsSyncScope, onBatch?: (posts: DiscoveredPost[]) => Promise<void>): Promise<DiscoveryResult> {
     const params = new URLSearchParams({
       fields: "id,media_product_type,media_type,media_url,permalink,text,timestamp,thumbnail_url",
       limit: "100",
-      since: String(Math.floor(Date.parse(scope.startTime) / 1000)),
-      until: String(Math.floor(Math.min(Date.parse(scope.endTimeExclusive), Date.now()) / 1000)),
       access_token: this.accessToken,
     });
+    if (!scope.allHistory) {
+      params.set("since", String(Math.floor(Date.parse(scope.startTime) / 1000)));
+      params.set("until", String(Math.floor(Math.min(Date.parse(scope.endTimeExclusive), Date.now()) / 1000)));
+    }
     let nextUrl: string | undefined = `${TH_BASE_URL}/${encodeURIComponent(this.userId)}/threads?${params.toString()}`;
     const posts: DiscoveryResult["posts"] = [];
     try {
@@ -117,12 +119,13 @@ export class ThreadsMetricsProvider implements MetricProvider {
         const body = JSON.parse(bodyText);
         const page = Array.isArray(body.data) ? body.data : [];
         let reachedOlder = false;
+        const pagePosts: DiscoveredPost[] = [];
         for (const item of page) {
           if (!item.id || !item.timestamp) continue;
           if (isOlderThanScope(item.timestamp, scope)) reachedOlder = true;
           if (!inScope(item.timestamp, scope)) continue;
           const mediaType = String(item.media_type || item.media_product_type || "TEXT").toUpperCase();
-          posts.push({
+          pagePosts.push({
             platform: "th",
             platformPostId: String(item.id),
             publishedAt: new Date(item.timestamp).toISOString(),
@@ -132,6 +135,8 @@ export class ThreadsMetricsProvider implements MetricProvider {
             permalink: item.permalink || undefined,
           });
         }
+        if (onBatch && pagePosts.length) await onBatch(pagePosts);
+        else posts.push(...pagePosts);
         nextUrl = reachedOlder ? undefined : body.paging?.next;
       }
       return { success: true, posts };

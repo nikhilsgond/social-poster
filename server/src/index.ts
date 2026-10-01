@@ -210,6 +210,7 @@ const server = http.createServer(async (req, res) => {
   // Metrics synchronization
   if (url.pathname === "/metrics/sync" && req.method === "POST") {
     try {
+      const allHistory = url.searchParams.get("all") === "true";
       const startDate = parseCalendarDate(url.searchParams.get("startDate"));
       const endDateExclusive = parseCalendarDate(url.searchParams.get("endDateExclusive"));
       const startTime = url.searchParams.get("startTime") || "";
@@ -218,19 +219,21 @@ const server = http.createServer(async (req, res) => {
       const platform = url.searchParams.get("platform") || undefined;
       let validTimeZone = true;
       try { new Intl.DateTimeFormat("en", { timeZone }).format(); } catch { validTimeZone = false; }
-      if (!startDate || !endDateExclusive || !Number.isFinite(Date.parse(startTime)) || !Number.isFinite(Date.parse(endTimeExclusive)) || !validTimeZone) {
+      if (!validTimeZone || (!allHistory && (!startDate || !endDateExclusive || !Number.isFinite(Date.parse(startTime)) || !Number.isFinite(Date.parse(endTimeExclusive))))) {
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Valid calendar dates and exact range boundaries are required." }));
         return;
       }
-      const startMs = Date.parse(`${startDate}T00:00:00.000Z`);
-      const endMs = Date.parse(`${endDateExclusive}T00:00:00.000Z`);
-      const rangeDays = (endMs - startMs) / 86_400_000;
-      const exactRangeMs = Date.parse(endTimeExclusive) - Date.parse(startTime);
-      if (rangeDays <= 0 || rangeDays > MAX_METRICS_SYNC_DAYS || exactRangeMs <= 0 || exactRangeMs > (MAX_METRICS_SYNC_DAYS + 1) * 86_400_000) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: `Metrics sync range must be between 1 and ${MAX_METRICS_SYNC_DAYS} days.` }));
-        return;
+      if (!allHistory) {
+        const startMs = Date.parse(`${startDate}T00:00:00.000Z`);
+        const endMs = Date.parse(`${endDateExclusive}T00:00:00.000Z`);
+        const rangeDays = (endMs - startMs) / 86_400_000;
+        const exactRangeMs = Date.parse(endTimeExclusive) - Date.parse(startTime);
+        if (rangeDays <= 0 || rangeDays > MAX_METRICS_SYNC_DAYS || exactRangeMs <= 0 || exactRangeMs > (MAX_METRICS_SYNC_DAYS + 1) * 86_400_000) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: `Metrics sync range must be between 1 and ${MAX_METRICS_SYNC_DAYS} days.` }));
+          return;
+        }
       }
       if (platform && !METRICS_SYNC_PLATFORMS.has(platform)) {
         res.writeHead(400, { "Content-Type": "application/json" });
@@ -280,12 +283,13 @@ const server = http.createServer(async (req, res) => {
 
       const service = new SyncMetricsService(providers, 5);
       const report = await service.syncAll({
-        startDate,
-        endDateExclusive,
-        startTime: new Date(startTime).toISOString(),
-        endTimeExclusive: new Date(endTimeExclusive).toISOString(),
+        startDate: allHistory ? "" : startDate!,
+        endDateExclusive: allHistory ? "" : endDateExclusive!,
+        startTime: allHistory ? "" : new Date(startTime).toISOString(),
+        endTimeExclusive: allHistory ? new Date().toISOString() : new Date(endTimeExclusive).toISOString(),
         timeZone,
         platform: platform as "ig" | "th" | "fb" | "yt" | undefined,
+        allHistory,
       });
 
       res.writeHead(200, { "Content-Type": "application/json" });

@@ -17,6 +17,7 @@ export interface MetricsSyncScope {
   endTimeExclusive: string;
   timeZone: string;
   platform?: MetricsSyncPlatform;
+  allHistory?: boolean;
 }
 
 export interface DiscoveredPost {
@@ -53,7 +54,7 @@ export interface MetricResult {
 
 export interface MetricProvider {
   isAvailable(): boolean | Promise<boolean>;
-  discoverPosts(scope: MetricsSyncScope): Promise<DiscoveryResult>;
+  discoverPosts(scope: MetricsSyncScope, onBatch?: (posts: DiscoveredPost[]) => Promise<void>): Promise<DiscoveryResult>;
   fetchMetrics(post: Post, knownMetrics?: FetchedMetrics): Promise<MetricResult>;
 }
 

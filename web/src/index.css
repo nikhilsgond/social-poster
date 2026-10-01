@@ -109,8 +109,15 @@ main#mainArea { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; sc
 .cal-sync-result.is-partial > b, .cal-sync-result.is-unavailable > b { color: #fbbf24; }
 .cal-sync-result.is-failed > b { color: var(--error); }
 .cal-sync-result.is-running { border-color: #666; }
+.cal-sync-controls { display: flex; flex-direction: column; gap: 6px; }
+.cal-sync-options { display: flex; flex-wrap: wrap; gap: 4px; }
+.cal-sync-options button { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-alt); color: var(--muted); font: inherit; font-size: .64rem; font-weight: 700; cursor: pointer; }
+.cal-sync-options button.active { border-color: var(--text); color: var(--text); }
+.cal-sync-custom { display: flex; align-items: end; gap: 6px; }
+.cal-sync-custom label { color: var(--muted); font-size: .62rem; }
+.cal-sync-custom input { display: block; margin-top: 2px; padding: 5px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel-alt); color: var(--text); font: inherit; font-size: .64rem; }
+.cal-sync-custom small { color: var(--error); font-size: .6rem; }
 .cal-sync-button { margin-left: auto; white-space: nowrap; }
-.cal-sync-preset { min-width: 126px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-alt); color: var(--text); }
 .cal-sync-button:disabled { cursor: wait; opacity: .55; }
 .cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); max-width: 1180px; width: 100%; margin: 0 auto; }
 .cal-weekday { text-align: center; font-size: 0.74rem; color: var(--muted); padding: 6px 0; font-weight: 600; }
@@ -254,6 +261,23 @@ table.data-table td.link-cell:hover { color: var(--text); }
 .metrics-updated-note { font-size: 0.74rem; color: var(--muted); margin-top: 8px; }
 .panel-actions { display: flex; justify-content: space-between; margin-top: 20px; gap: 8px; align-items: center; }
 .panel-actions .right { display: flex; gap: 8px; margin-left: auto; }
+
+.export-panel { max-width: 520px; }
+.export-fieldset { border: 0; padding: 0; margin: 18px 0 0; }
+.export-fieldset legend, .export-platform span { color: var(--muted); font-size: .74rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+.export-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.export-type-options { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.export-option { display: flex !important; align-items: center; gap: 8px; margin: 0 !important; padding: 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-alt); color: var(--muted) !important; cursor: pointer; }
+.export-option.active { border-color: var(--text); color: var(--text) !important; }
+.export-option input { accent-color: var(--text); margin: 0; }
+.export-platform { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 18px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel-alt); }
+.export-platform span { margin: 0; }
+.export-platform strong { font-size: .84rem; }
+.export-custom-range { display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; gap: 8px; margin-top: 10px; }
+.export-custom-range label { margin: 0; }
+.export-custom-range input { display: block; margin-top: 5px; }
+.export-custom-range small { grid-column: 1 / -1; color: var(--error); font-size: .7rem; }
+.export-print-sheet { display: none; }
 
 /* ========== Create Post workflow ========== */
 .create-workflow { max-width: 860px; padding: 0; overflow: hidden; display: flex; flex-direction: column; }
@@ -702,6 +726,17 @@ ul.create-errors { padding-left: 28px; }
   .cal-grid { height: auto !important; max-height: none !important; min-height: 0 !important; overflow: visible !important; }
   .cal-preview { display: none !important; }
   .cal-cell { break-inside: avoid; }
+  .app.export-printing > :not(.export-print-sheet) { display: none !important; }
+  .app.export-printing .export-print-sheet { display: block !important; color: #111; background: #fff; }
+  .export-print-sheet h1 { margin: 0 0 4px; font-size: 18pt; }
+  .export-print-sheet p { margin: 0 0 12px; font-size: 10pt; }
+  .export-print-sheet table { width: 100%; border-collapse: collapse; font-size: 7pt; }
+  .export-print-sheet th, .export-print-sheet td { border: 1px solid #bbb; padding: 4px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+  .export-print-sheet th { background: #eee; }
+}
+
+@media (max-width: 600px) {
+  .export-options { grid-template-columns: 1fr; }
 }
 
 /* ========== Reduced Motion ========== */

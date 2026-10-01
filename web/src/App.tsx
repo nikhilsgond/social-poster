@@ -8,7 +8,7 @@ import { PostProvider, usePostContext } from "./context/PostContext";
 import { useToast, ToastProvider } from "./components/common/Toast";
 import { PlatformIcon, platformDataMap } from "./components/common/PlatformIcon";
 import { Calendar } from "./components/Calendar/Calendar";
-import type { CalendarMonthSyncState, CalendarPlatformSyncState, CalendarSyncPreset } from "./components/Calendar/Calendar";
+import type { CalendarMonthSyncState, CalendarPlatformSyncState, CalendarSyncRequest } from "./components/Calendar/Calendar";
 import { Tables, getFilteredSortedPosts } from "./components/Tables/Tables";
 import { Metrics } from "./components/Metrics/Metrics";
 import { CreatePostWorkflow } from "./components/CreatePost/CreatePostWorkflow";
@@ -22,9 +22,12 @@ import { formatTimestamp, snapshotTrendData, metricNumber, formatMetric, escapeH
 import type { SnapshotSummary, SnapshotPlatformStat, TrendData } from "./lib/metrics";
 import { syncMetrics } from "./lib/backend";
 import type { MetricsSyncPlatform } from "./lib/backend";
+import { exportRecordsToCSV, filterPostsForExport, toExportRecords } from "./lib/exportPosts";
+import type { ExportPostRecord, ExportRangeType } from "./lib/exportPosts";
 import "./index.css";
 
 type View = "calendar" | "tables" | "metrics";
+type ExportType = "json" | "csv" | "print";
 
 const PLATFORMS: Platform[] = ["yt", "ig", "fb", "th", "li", "x"];
 const METRICS_SYNC_PLATFORMS: MetricsSyncPlatform[] = ["ig", "th", "fb", "yt"];
@@ -130,21 +133,32 @@ function AppContent() {
     results: {},
   });
 
-  const handleSync = useCallback(async (preset: CalendarSyncPreset) => {
+  const handleSync = useCallback(async (request: CalendarSyncRequest) => {
     if (monthSync.running) return;
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const end = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
-    const start = preset === "today"
-      ? today
-      : preset === "7d"
-        ? new Date(today.getFullYear(), today.getMonth(), today.getDate() - 6)
-        : new Date(today.getFullYear(), today.getMonth(), 1);
-    if (preset === "month") end.setFullYear(today.getFullYear(), today.getMonth() + 1, 1);
     const localDate = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
-    const startDate = localDate(start);
-    const endDateExclusive = localDate(end);
-    const monthLabel = preset === "today" ? "Today" : preset === "7d" ? "Last 7 Days" : new Intl.DateTimeFormat("en", { month: "long", year: "numeric" }).format(start);
+    const allHistory = request.preset === "all";
+    let start: Date | null = null;
+    let end: Date | null = null;
+    let monthLabel = "All Available History";
+    if (request.preset === "custom") {
+      if (!request.startDate || !request.endDate || request.startDate > request.endDate) {
+        showToast("Invalid sync range", "Choose a valid From and To date.", "warning");
+        return;
+      }
+      start = new Date(`${request.startDate}T00:00:00`);
+      const selectedEnd = new Date(`${request.endDate}T00:00:00`);
+      end = new Date(selectedEnd.getFullYear(), selectedEnd.getMonth(), selectedEnd.getDate() + 1);
+      monthLabel = `${request.startDate} – ${request.endDate}`;
+    } else if (!allHistory) {
+      const days = request.preset === "7d" ? 7 : request.preset === "30d" ? 30 : 90;
+      start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (days - 1));
+      end = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+      monthLabel = `Past ${days} Days`;
+    }
+    const startDate = start ? localDate(start) : undefined;
+    const endDateExclusive = end ? localDate(end) : undefined;
     const pendingResults = Object.fromEntries(METRICS_SYNC_PLATFORMS.map((platform) => [
       platform,
       { status: "pending", discovered: 0, added: 0, existing: 0, processed: 0, failed: 0, snapshotFailures: 0 } satisfies CalendarPlatformSyncState,
@@ -158,7 +172,15 @@ function AppContent() {
         results: { ...current.results, [platform]: { ...current.results[platform]!, status: "running" } },
       }));
       try {
-        const report = await syncMetrics({ startDate, endDateExclusive, startTime: start.toISOString(), endTimeExclusive: end.toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, platform });
+        const report = await syncMetrics({
+          startDate,
+          endDateExclusive,
+          startTime: start?.toISOString(),
+          endTimeExclusive: end?.toISOString(),
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          platform,
+          allHistory,
+        });
         const result = report.platforms[platform];
         const discovered = result?.discovered ?? report.summary.discovered;
         const failed = result?.failed ?? report.summary.failed;
@@ -262,6 +284,14 @@ function AppContent() {
   // ── Phase 5 reuse scheduler ──
   const [reuseOpen, setReuseOpen] = useState(false);
   const [reuseSource, setReuseSource] = useState<Post | null>(null);
+
+  // ── Export state ──
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportType, setExportType] = useState<ExportType>("csv");
+  const [exportRange, setExportRange] = useState<ExportRangeType | null>(null);
+  const [exportStartDate, setExportStartDate] = useState("");
+  const [exportEndDate, setExportEndDate] = useState("");
+  const [printExport, setPrintExport] = useState<{ records: ExportPostRecord[]; period: string; platform: string } | null>(null);
 
   // ── URL sync ──
   const syncUrl = useCallback(() => {
@@ -505,34 +535,70 @@ function AppContent() {
   }, [movePost, toast]);
 
   // ── Export ──
-  const exportJSON = useCallback(() => {
-    const blob = new Blob([JSON.stringify(posts, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "social-planner-export.json"; a.click();
-    URL.revokeObjectURL(url);
-    toast("Exported", "JSON export downloaded.", "success");
-  }, [posts, toast]);
+  const openExport = useCallback(() => {
+    setExportType("csv");
+    setExportRange(null);
+    setExportStartDate("");
+    setExportEndDate("");
+    setExportOpen(true);
+  }, []);
 
-  const exportCSV = useCallback(() => {
-    if (!posts.length) { toast("Nothing to export", "No posts to export.", "info"); return; }
-    const headers = ["Date", "Time", "Platform", "Content Type", "Title", "Topic", "Content", "Status", "Views", "Likes", "Comments"];
-    const rows = posts.map((p) => [p.date, p.time, platformDataMap[p.platform].name, p.contentType || "", p.title || "", p.topic || "", (p.content || p.caption || "").replace(/,/g, " "), p.status, p.views || 0, p.likes || 0, p.comments || 0]);
-    const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
+  const downloadExport = useCallback((contents: string, type: string, filename: string) => {
+    const blob = new Blob([contents], { type });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "social-planner-export.csv"; a.click();
-    URL.revokeObjectURL(url);
-    toast("Exported", "CSV export downloaded.", "success");
-  }, [posts, toast]);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }, []);
 
-  const printTable = useCallback(() => { window.print(); }, []);
+  const runExport = useCallback(() => {
+    if (!exportRange) return;
+    const range = { type: exportRange, from: exportStartDate, to: exportEndDate };
+    const matchingPosts = filterPostsForExport(posts, tableTab, range);
+    const platformLabel = tableTab === "all" ? "All Platforms" : platformDataMap[tableTab].name;
+    const period = exportRange === "custom" ? `${exportStartDate} to ${exportEndDate}` : `past ${exportRange} days`;
+    if (!matchingPosts.length) {
+      const subject = tableTab === "all" ? "posts" : `${platformLabel} posts`;
+      toast("Nothing to export", `No ${subject} found in the ${period}.`, "info");
+      return;
+    }
+
+    const records = toExportRecords(matchingPosts);
+    const platformSlug = tableTab === "all" ? "all-platforms" : tableTab;
+    const rangeSlug = exportRange === "custom" ? `${exportStartDate}-to-${exportEndDate}` : `${exportRange}d`;
+    const basename = `social-planner-${platformSlug}-${rangeSlug}`;
+    setExportOpen(false);
+    if (exportType === "json") {
+      downloadExport(JSON.stringify(records, null, 2), "application/json", `${basename}.json`);
+      toast("Exported", `${records.length} post${records.length === 1 ? "" : "s"} exported as JSON.`, "success");
+    } else if (exportType === "csv") {
+      downloadExport(`\uFEFF${exportRecordsToCSV(records)}`, "text/csv;charset=utf-8", `${basename}.csv`);
+      toast("Exported", `${records.length} post${records.length === 1 ? "" : "s"} exported as CSV.`, "success");
+    } else {
+      setPrintExport({ records, period, platform: platformLabel });
+    }
+  }, [downloadExport, exportEndDate, exportRange, exportStartDate, exportType, posts, tableTab, toast]);
+
+  useEffect(() => {
+    if (!printExport) return;
+    const timer = window.setTimeout(() => {
+      window.print();
+      setPrintExport(null);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [printExport]);
 
   // ── Keyboard ──
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      const isModal = modalOpen || reuseOpen;
+      const isModal = modalOpen || reuseOpen || exportOpen;
       if (e.key === "Escape") {
         if (selectionMode) { exitDeleteMode(); }
+        else if (exportOpen) { setExportOpen(false); }
         else if (reuseOpen) { closeReuseScheduler(); }
         else if (modalOpen && !createProcessing) { closeModal(); }
         return;
@@ -549,16 +615,23 @@ function AppContent() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [modalOpen, reuseOpen, selectionMode, view, undo, redo, navMonth, goToday, exitDeleteMode, closeModal, closeReuseScheduler, createProcessing]);
+  }, [modalOpen, reuseOpen, exportOpen, selectionMode, view, undo, redo, navMonth, goToday, exitDeleteMode, closeModal, closeReuseScheduler, createProcessing]);
 
   // ── Content type options ──
   const contentTypeOptions = CONTENT_TYPES[modalPlatform] || [];
   const activeEditPost = editPostId ? posts.find((post) => post.id === editPostId) : undefined;
   const isPublishedView = activeEditPost?.status === "published";
+  const exportRangeError = exportRange === "custom"
+    ? !exportStartDate || !exportEndDate
+      ? "Choose both dates."
+      : exportStartDate > exportEndDate
+        ? "From date cannot be after To date."
+        : ""
+    : "";
 
   // ── Render ──
   return (
-    <div className="app">
+    <div className={`app${printExport ? " export-printing" : ""}`}>
       <div className={`app-boot${bootLoaded ? " hide" : ""}`}>
         <div className="boot-dot" />
         <span>Loading...</span>
@@ -658,9 +731,7 @@ function AppContent() {
               onEnterDeleteMode={enterDeleteMode}
               onExitDeleteMode={exitDeleteMode}
               onDeleteSelected={bulkDelete}
-              onExportJSON={exportJSON}
-              onExportCSV={exportCSV}
-              onPrint={printTable}
+              onExport={openExport}
               onEditPost={openEditModal}
               onViewPost={onViewPost}
               onDeletePost={deletePostFn}
@@ -922,6 +993,76 @@ function AppContent() {
       )}
 
       {reuseOpen && <ReuseSchedulerModal sourcePost={reuseSource} onClose={closeReuseScheduler} />}
+
+      {exportOpen && (
+        <div className="overlay" onClick={(event) => { if (event.target === event.currentTarget) setExportOpen(false); }}>
+          <div className="panel export-panel" role="dialog" aria-modal="true" aria-labelledby="export-title">
+            <h3 id="export-title">Export Data</h3>
+            <p className="sub">Choose a format and date range. The active Posts Table platform filter will be applied.</p>
+
+            <fieldset className="export-fieldset">
+              <legend>Export Type</legend>
+              <div className="export-options export-type-options">
+                {(["json", "csv", "print"] as ExportType[]).map((type) => (
+                  <label key={type} className={`export-option${exportType === type ? " active" : ""}`}>
+                    <input type="radio" name="export-type" value={type} checked={exportType === type} onChange={() => setExportType(type)} />
+                    {type === "json" ? "JSON" : type === "csv" ? "CSV" : "Print / PDF"}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            <fieldset className="export-fieldset">
+              <legend>Date Range</legend>
+              <div className="export-options">
+                {([7, 30, 90, "custom"] as ExportRangeType[]).map((range) => (
+                  <label key={range} className={`export-option${exportRange === range ? " active" : ""}`}>
+                    <input type="radio" name="export-range" value={range} checked={exportRange === range} onChange={() => setExportRange(range)} />
+                    {range === "custom" ? "Custom Range" : `Past ${range} days`}
+                  </label>
+                ))}
+              </div>
+              {exportRange === "custom" && (
+                <div className="export-custom-range">
+                  <label>From <input type="date" value={exportStartDate} onChange={(event) => setExportStartDate(event.target.value)} /></label>
+                  <span>→</span>
+                  <label>To <input type="date" value={exportEndDate} onChange={(event) => setExportEndDate(event.target.value)} /></label>
+                  {exportRangeError && <small>{exportRangeError}</small>}
+                </div>
+              )}
+            </fieldset>
+
+            <div className="export-platform">
+              <span>Platform</span>
+              <strong>{tableTab === "all" ? "All Platforms" : platformDataMap[tableTab].name}</strong>
+            </div>
+
+            <div className="panel-actions">
+              <div className="right">
+                <button type="button" className="btn-secondary" onClick={() => setExportOpen(false)}>Cancel</button>
+                <button type="button" className="btn-primary" disabled={!exportRange || Boolean(exportRangeError)} onClick={runExport}>Export</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {printExport && (
+        <section className="export-print-sheet">
+          <h1>Social Planner Export</h1>
+          <p>{printExport.platform} · {printExport.period}</p>
+          <table>
+            <thead><tr><th>Platform</th><th>Type</th><th>Post</th><th>Status</th><th>Scheduled</th><th>Published</th><th>Views</th><th>Likes</th><th>Comments</th><th>Shares</th><th>Platform Post ID</th><th>Post URL</th></tr></thead>
+            <tbody>
+              {printExport.records.map((record, index) => (
+                <tr key={`${record.platformPostId}-${index}`}>
+                  <td>{record.platform}</td><td>{record.contentType}</td><td>{record.title || record.caption || record.content || record.topic || record.description}</td><td>{record.status}</td><td>{record.scheduledAt}</td><td>{record.publishedAt}</td><td>{record.views}</td><td>{record.likes}</td><td>{record.comments}</td><td>{record.shares}</td><td>{record.platformPostId}</td><td>{record.postUrl}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
 
       <div className="toast-stack" aria-live="polite" />
     </div>

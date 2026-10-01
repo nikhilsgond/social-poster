@@ -200,114 +200,120 @@ export class SyncMetricsService {
           continue;
         }
 
-        const discovery = await provider.discoverPosts(scope);
+        const seenPlatformPostIds = new Set<string>();
+        let stopForPlatformFailure = false;
+        const processBatch = async (batch: DiscoveredPost[]) => {
+          const discovered = [...new Map(batch.map((post) => [post.platformPostId, post])).values()]
+            .filter((post) => {
+              if (seenPlatformPostIds.has(post.platformPostId)) return false;
+              seenPlatformPostIds.add(post.platformPostId);
+              return true;
+            });
+          if (!discovered.length) return;
+
+          result.discovered += discovered.length;
+          const existing = await loadExisting(platform, discovered.map((post) => post.platformPostId));
+          result.existing += existing.size;
+
+          for (const item of discovered) {
+            if (existing.has(item.platformPostId)) continue;
+            const insertRow = metadataRow(item, scope.timeZone);
+            if (item.metrics?.views !== undefined) insertRow.views = item.metrics.views;
+            if (item.metrics?.likes !== undefined) insertRow.likes = item.metrics.likes;
+            if (item.metrics?.comments !== undefined) insertRow.comments = item.metrics.comments;
+            if (item.metrics && Object.keys(item.metrics).length) insertRow.metrics_updated_at = new Date().toISOString();
+            const { data, error } = await supabaseServer.from("posts").insert(insertRow).select().single();
+            if (error) {
+              if (error.code === "23505") {
+                const raced = await loadExisting(platform, [item.platformPostId]);
+                const post = raced.get(item.platformPostId);
+                if (post) {
+                  existing.set(item.platformPostId, post);
+                  result.existing++;
+                  continue;
+                }
+              }
+              logError("Discovered post insert failed", { platform, platformPostId: item.platformPostId, error: error.message });
+              result.failed++;
+              result.errors.push("A discovered post could not be saved.");
+              continue;
+            }
+            existing.set(item.platformPostId, normalizedPost(data));
+            result.added++;
+          }
+
+          let latestSnapshots = new Map<string, { shares: number; platformMetrics: Record<string, unknown> }>();
+          try {
+            latestSnapshots = await loadLatestSnapshots([...existing.values()].map((post) => post.id));
+          } catch (err: any) {
+            logWarn("Prior snapshots could not be loaded", { platform, error: err.message });
+          }
+
+          for (const item of discovered) {
+            const post = existing.get(item.platformPostId);
+            if (!post) continue;
+            if (stopForPlatformFailure) {
+              result.failed++;
+              continue;
+            }
+
+            let latestMetrics = item.metrics || {};
+            if (!item.metricsComplete) {
+              const fetched = await provider.fetchMetrics(post, item.metrics);
+              if (!fetched.success) {
+                result.failed++;
+                result.errors.push("Metrics could not be refreshed for a discovered post.");
+                if (fetched.platformUnavailable) {
+                  result.unavailable = true;
+                  stopForPlatformFailure = true;
+                }
+                continue;
+              }
+              latestMetrics = mergeMetrics(item.metrics, fetched.metrics);
+            }
+
+            const prior = latestSnapshots.get(post.id);
+            const effective = {
+              views: latestMetrics.views ?? post.views ?? 0,
+              likes: latestMetrics.likes ?? post.likes ?? 0,
+              comments: latestMetrics.comments ?? post.comments ?? 0,
+              shares: latestMetrics.shares ?? prior?.shares ?? 0,
+              platformMetrics: {
+                ...(prior?.platformMetrics || {}),
+                ...(latestMetrics.platformMetrics || {}),
+              },
+            };
+
+            const updateRow = metadataRow(item, scope.timeZone);
+            updateRow.views = effective.views;
+            updateRow.likes = effective.likes;
+            updateRow.comments = effective.comments;
+            updateRow.metrics_updated_at = new Date().toISOString();
+            const { error: updateError } = await supabaseServer.from("posts").update(updateRow).eq("id", post.id);
+            if (updateError) {
+              logError("Discovered post reconciliation failed", { platform, postId: post.id, error: updateError.message });
+              result.failed++;
+              result.errors.push("A discovered post could not be updated.");
+              continue;
+            }
+
+            try {
+              await upsertSnapshot(post.id, platform, capturedAt, effective);
+              result.updated++;
+            } catch (err: any) {
+              logError("Metric snapshot persistence failed", { platform, postId: post.id, error: err.message });
+              result.snapshotFailures++;
+              result.failed++;
+              result.errors.push("A metric snapshot could not be saved.");
+            }
+          }
+        };
+
+        const discovery = await provider.discoverPosts(scope, processBatch);
         if (!discovery.success) {
           result.unavailable = discovery.platformUnavailable;
           result.errors.push(discovery.error || "Platform discovery failed.");
-          result.failed = discovery.posts.length;
           report.success = false;
-          addToSummary(report, result);
-          continue;
-        }
-
-        const discovered = [...new Map(discovery.posts.map((post) => [post.platformPostId, post])).values()];
-        result.discovered = discovered.length;
-        const existing = await loadExisting(platform, discovered.map((post) => post.platformPostId));
-        result.existing = existing.size;
-
-        for (const item of discovered) {
-          if (existing.has(item.platformPostId)) continue;
-          const insertRow = metadataRow(item, scope.timeZone);
-          if (item.metrics?.views !== undefined) insertRow.views = item.metrics.views;
-          if (item.metrics?.likes !== undefined) insertRow.likes = item.metrics.likes;
-          if (item.metrics?.comments !== undefined) insertRow.comments = item.metrics.comments;
-          if (item.metrics && Object.keys(item.metrics).length) insertRow.metrics_updated_at = new Date().toISOString();
-          const { data, error } = await supabaseServer.from("posts").insert(insertRow).select().single();
-          if (error) {
-            if (error.code === "23505") {
-              const raced = await loadExisting(platform, [item.platformPostId]);
-              const post = raced.get(item.platformPostId);
-              if (post) {
-                existing.set(item.platformPostId, post);
-                result.existing++;
-                continue;
-              }
-            }
-            logError("Discovered post insert failed", { platform, platformPostId: item.platformPostId, error: error.message });
-            result.failed++;
-            result.errors.push("A discovered post could not be saved.");
-            continue;
-          }
-          existing.set(item.platformPostId, normalizedPost(data));
-          result.added++;
-        }
-
-        let latestSnapshots = new Map<string, { shares: number; platformMetrics: Record<string, unknown> }>();
-        try {
-          latestSnapshots = await loadLatestSnapshots([...existing.values()].map((post) => post.id));
-        } catch (err: any) {
-          logWarn("Prior snapshots could not be loaded", { platform, error: err.message });
-        }
-
-        let stopForPlatformFailure = false;
-        for (let index = 0; index < discovered.length; index++) {
-          const item = discovered[index];
-          const post = existing.get(item.platformPostId);
-          if (!post) continue;
-          if (stopForPlatformFailure) {
-            result.failed++;
-            continue;
-          }
-
-          let latestMetrics = item.metrics || {};
-          if (!item.metricsComplete) {
-            const fetched = await provider.fetchMetrics(post, item.metrics);
-            if (!fetched.success) {
-              result.failed++;
-              result.errors.push("Metrics could not be refreshed for a discovered post.");
-              if (fetched.platformUnavailable) {
-                result.unavailable = true;
-                stopForPlatformFailure = true;
-              }
-              continue;
-            }
-            latestMetrics = mergeMetrics(item.metrics, fetched.metrics);
-          }
-
-          const prior = latestSnapshots.get(post.id);
-          const effective = {
-            views: latestMetrics.views ?? post.views ?? 0,
-            likes: latestMetrics.likes ?? post.likes ?? 0,
-            comments: latestMetrics.comments ?? post.comments ?? 0,
-            shares: latestMetrics.shares ?? prior?.shares ?? 0,
-            platformMetrics: {
-              ...(prior?.platformMetrics || {}),
-              ...(latestMetrics.platformMetrics || {}),
-            },
-          };
-
-          const updateRow = metadataRow(item, scope.timeZone);
-          updateRow.views = effective.views;
-          updateRow.likes = effective.likes;
-          updateRow.comments = effective.comments;
-          updateRow.metrics_updated_at = new Date().toISOString();
-          const { error: updateError } = await supabaseServer.from("posts").update(updateRow).eq("id", post.id);
-          if (updateError) {
-            logError("Discovered post reconciliation failed", { platform, postId: post.id, error: updateError.message });
-            result.failed++;
-            result.errors.push("A discovered post could not be updated.");
-            continue;
-          }
-
-          try {
-            await upsertSnapshot(post.id, platform, capturedAt, effective);
-            result.updated++;
-          } catch (err: any) {
-            logError("Metric snapshot persistence failed", { platform, postId: post.id, error: err.message });
-            result.snapshotFailures++;
-            result.failed++;
-            result.errors.push("A metric snapshot could not be saved.");
-          }
         }
       } catch (err: any) {
         logError("Platform synchronization failed", { platform, error: err.message });

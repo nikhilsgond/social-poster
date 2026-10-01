@@ -23,7 +23,7 @@
 // Part of Phase 1: Metrics Synchronization.
 
 import type { Post } from "../../types";
-import type { MetricProvider, MetricResult, FetchedMetrics, MetricsSyncScope, DiscoveryResult } from "../interface";
+import type { MetricProvider, MetricResult, FetchedMetrics, MetricsSyncScope, DiscoveryResult, DiscoveredPost } from "../interface";
 import { logInfo, logError } from "../../lib/logger";
 import { inScope, isOlderThanScope, looksLikePlatformAuthFailure, numberMetric, publicProviderError } from "./shared";
 
@@ -156,14 +156,16 @@ export class FacebookMetricsProvider implements MetricProvider {
     return true; // Availability determined by real API call
   }
 
-  async discoverPosts(scope: MetricsSyncScope): Promise<DiscoveryResult> {
+  async discoverPosts(scope: MetricsSyncScope, onBatch?: (posts: DiscoveredPost[]) => Promise<void>): Promise<DiscoveryResult> {
     const params = new URLSearchParams({
       fields: "id,message,created_time,permalink_url,full_picture,attachments{media_type,type},shares,comments.limit(0).summary(true),reactions.type(LIKE).limit(0).summary(true)",
       limit: "100",
-      since: String(Math.floor(Date.parse(scope.startTime) / 1000)),
-      until: String(Math.floor(Date.parse(scope.endTimeExclusive) / 1000)),
       access_token: this.pageAccessToken,
     });
+    if (!scope.allHistory) {
+      params.set("since", String(Math.floor(Date.parse(scope.startTime) / 1000)));
+      params.set("until", String(Math.floor(Date.parse(scope.endTimeExclusive) / 1000)));
+    }
     let nextUrl: string | undefined = `${FB_BASE_URL}/${encodeURIComponent(this.pageId)}/posts?${params.toString()}`;
     const posts: DiscoveryResult["posts"] = [];
     try {
@@ -181,13 +183,14 @@ export class FacebookMetricsProvider implements MetricProvider {
         const body = JSON.parse(bodyText);
         const page = Array.isArray(body.data) ? body.data : [];
         let reachedOlder = false;
+        const pagePosts: DiscoveredPost[] = [];
         for (const item of page) {
           if (!item.id || !item.created_time) continue;
           if (isOlderThanScope(item.created_time, scope)) reachedOlder = true;
           if (!inScope(item.created_time, scope)) continue;
           const attachment = item.attachments?.data?.[0];
           const type = String(attachment?.media_type || attachment?.type || "status").toLowerCase();
-          posts.push({
+          pagePosts.push({
             platform: "fb",
             platformPostId: String(item.id),
             publishedAt: new Date(item.created_time).toISOString(),
@@ -202,6 +205,8 @@ export class FacebookMetricsProvider implements MetricProvider {
             },
           });
         }
+        if (onBatch && pagePosts.length) await onBatch(pagePosts);
+        else posts.push(...pagePosts);
         nextUrl = reachedOlder ? undefined : body.paging?.next;
       }
       return { success: true, posts };

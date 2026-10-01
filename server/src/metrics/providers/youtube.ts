@@ -1,6 +1,6 @@
 import { OAuth2Client } from "google-auth-library";
 import type { Post } from "../../types";
-import type { DiscoveryResult, FetchedMetrics, MetricProvider, MetricResult, MetricsSyncScope } from "../interface";
+import type { DiscoveredPost, DiscoveryResult, FetchedMetrics, MetricProvider, MetricResult, MetricsSyncScope } from "../interface";
 import { logError } from "../../lib/logger";
 import { inScope, isOlderThanScope, looksLikePlatformAuthFailure, numberMetric, publicProviderError } from "./shared";
 
@@ -52,19 +52,20 @@ export class YouTubeMetricsProvider implements MetricProvider {
     return JSON.parse(bodyText);
   }
 
-  async discoverPosts(scope: MetricsSyncScope): Promise<DiscoveryResult> {
+  async discoverPosts(scope: MetricsSyncScope, onBatch?: (posts: DiscoveredPost[]) => Promise<void>): Promise<DiscoveryResult> {
     try {
       const channels = await this.request("/channels?part=contentDetails&mine=true");
       const uploadsId = channels.items?.[0]?.contentDetails?.relatedPlaylists?.uploads;
       if (!uploadsId) return { success: false, posts: [], platformUnavailable: true, error: publicProviderError("YouTube") };
 
-      const candidates: Array<{ id: string; publishedAt: string }> = [];
       let pageToken = "";
       let reachedOlder = false;
+      const posts: DiscoveryResult["posts"] = [];
       do {
         const params = new URLSearchParams({ part: "snippet,contentDetails", playlistId: uploadsId, maxResults: "50" });
         if (pageToken) params.set("pageToken", pageToken);
         const page = await this.request(`/playlistItems?${params.toString()}`);
+        const candidates: Array<{ id: string; publishedAt: string }> = [];
         for (const item of page.items || []) {
           const id = item.contentDetails?.videoId || item.snippet?.resourceId?.videoId;
           const publishedAt = item.contentDetails?.videoPublishedAt || item.snippet?.publishedAt;
@@ -72,41 +73,42 @@ export class YouTubeMetricsProvider implements MetricProvider {
           if (isOlderThanScope(publishedAt, scope)) reachedOlder = true;
           if (inScope(publishedAt, scope)) candidates.push({ id, publishedAt });
         }
+        const pagePosts: DiscoveredPost[] = [];
+        for (const batch of chunks(candidates, 50)) {
+          const detailsParams = new URLSearchParams({
+            part: "snippet,statistics,status,contentDetails",
+            id: batch.map((item) => item.id).join(","),
+            maxResults: "50",
+          });
+          const response = await this.request(`/videos?${detailsParams.toString()}`);
+          for (const item of response.items || []) {
+            const fallback = candidates.find((candidate) => candidate.id === item.id);
+            const publishedAt = item.snippet?.publishedAt || fallback?.publishedAt;
+            if (!publishedAt || !inScope(publishedAt, scope) || item.status?.privacyStatus === "private") continue;
+            const thumbnails = item.snippet?.thumbnails || {};
+            const thumbnail = thumbnails.maxres?.url || thumbnails.standard?.url || thumbnails.high?.url || thumbnails.medium?.url || thumbnails.default?.url;
+            pagePosts.push({
+              platform: "yt",
+              platformPostId: String(item.id),
+              publishedAt: new Date(publishedAt).toISOString(),
+              contentType: isShort(item.contentDetails?.duration) ? "Short" : "Video",
+              title: item.snippet?.title || undefined,
+              description: item.snippet?.description || undefined,
+              mediaUrl: thumbnail || undefined,
+              permalink: `https://www.youtube.com/watch?v=${encodeURIComponent(item.id)}`,
+              metrics: {
+                views: numberMetric(item.statistics?.viewCount),
+                likes: numberMetric(item.statistics?.likeCount),
+                comments: numberMetric(item.statistics?.commentCount),
+              },
+              metricsComplete: true,
+            });
+          }
+        }
+        if (onBatch && pagePosts.length) await onBatch(pagePosts);
+        else posts.push(...pagePosts);
         pageToken = reachedOlder ? "" : page.nextPageToken || "";
       } while (pageToken);
-
-      const posts: DiscoveryResult["posts"] = [];
-      for (const batch of chunks(candidates, 50)) {
-        const params = new URLSearchParams({
-          part: "snippet,statistics,status,contentDetails",
-          id: batch.map((item) => item.id).join(","),
-          maxResults: "50",
-        });
-        const response = await this.request(`/videos?${params.toString()}`);
-        for (const item of response.items || []) {
-          const fallback = candidates.find((candidate) => candidate.id === item.id);
-          const publishedAt = item.snippet?.publishedAt || fallback?.publishedAt;
-          if (!publishedAt || !inScope(publishedAt, scope) || item.status?.privacyStatus === "private") continue;
-          const thumbnails = item.snippet?.thumbnails || {};
-          const thumbnail = thumbnails.maxres?.url || thumbnails.standard?.url || thumbnails.high?.url || thumbnails.medium?.url || thumbnails.default?.url;
-          posts.push({
-            platform: "yt",
-            platformPostId: String(item.id),
-            publishedAt: new Date(publishedAt).toISOString(),
-            contentType: isShort(item.contentDetails?.duration) ? "Short" : "Video",
-            title: item.snippet?.title || undefined,
-            description: item.snippet?.description || undefined,
-            mediaUrl: thumbnail || undefined,
-            permalink: `https://www.youtube.com/watch?v=${encodeURIComponent(item.id)}`,
-            metrics: {
-              views: numberMetric(item.statistics?.viewCount),
-              likes: numberMetric(item.statistics?.likeCount),
-              comments: numberMetric(item.statistics?.commentCount),
-            },
-            metricsComplete: true,
-          });
-        }
-      }
       return { success: true, posts };
     } catch (err: any) {
       logError("YouTube discovery failed", { error: err.message });

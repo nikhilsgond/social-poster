@@ -42,23 +42,25 @@ export interface MetricsSyncReport {
 }
 
 export interface MetricsSyncRequest {
-  startDate: string;
-  endDateExclusive: string;
-  startTime: string;
-  endTimeExclusive: string;
+  startDate?: string;
+  endDateExclusive?: string;
+  startTime?: string;
+  endTimeExclusive?: string;
   timeZone: string;
   platform: MetricsSyncPlatform;
+  allHistory?: boolean;
 }
 
 export async function syncMetrics(request: MetricsSyncRequest): Promise<MetricsSyncReport> {
-  const params = new URLSearchParams({
-    startDate: request.startDate,
-    endDateExclusive: request.endDateExclusive,
-    startTime: request.startTime,
-    endTimeExclusive: request.endTimeExclusive,
-    timeZone: request.timeZone,
-    platform: request.platform,
-  });
+  const params = new URLSearchParams({ timeZone: request.timeZone, platform: request.platform });
+  if (request.allHistory) {
+    params.set("all", "true");
+  } else {
+    params.set("startDate", request.startDate || "");
+    params.set("endDateExclusive", request.endDateExclusive || "");
+    params.set("startTime", request.startTime || "");
+    params.set("endTimeExclusive", request.endTimeExclusive || "");
+  }
   const response = await fetch(`${backendUrl}/metrics/sync?${params.toString()}`, {
     method: "POST",
     headers: { Authorization: `Bearer ${requestOwnerToken()}` },

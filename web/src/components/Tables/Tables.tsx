@@ -25,9 +25,7 @@ interface TablesProps {
   onEnterDeleteMode: () => void;
   onExitDeleteMode: () => void;
   onDeleteSelected: () => void;
-  onExportJSON: () => void;
-  onExportCSV: () => void;
-  onPrint: () => void;
+  onExport: () => void;
   onEditPost: (post: Post) => void;
   onViewPost: (post: Post) => void;
   onDeletePost: (id: string) => void;
@@ -135,7 +133,7 @@ export const Tables: React.FC<TablesProps> = ({
   tableContentType, onContentTypeChange, tableStatus, onStatusChange,
   tableSort, onSortChange, tableSortDir, onSortDirChange,
   selectionMode, onEnterDeleteMode, onExitDeleteMode, onDeleteSelected,
-  onExportJSON, onExportCSV, onPrint, onEditPost, onViewPost, onDeletePost, onReusePost, onClearFilters,
+  onExport, onEditPost, onViewPost, onDeletePost, onReusePost, onClearFilters,
   selectedPosts, onToggleSelect, posts, pageSize, currentPage, onPageChange, focusPostId,
 }) => {
   const { showToast } = useToast();
@@ -356,9 +354,7 @@ export const Tables: React.FC<TablesProps> = ({
           <span className="selection-count">Delete mode is off</span>
           <div className="toolbar-mini">
             <button type="button" className="btn-danger" data-action="enter-delete-mode" onClick={onEnterDeleteMode}>Delete</button>
-            <button type="button" className="btn-secondary btn-mini" data-action="export-json" onClick={onExportJSON}>Export JSON</button>
-            <button type="button" className="btn-secondary btn-mini" data-action="export-csv" onClick={onExportCSV}>Export CSV</button>
-            <button type="button" className="btn-secondary btn-mini" data-action="print-table" onClick={onPrint}>Print / PDF</button>
+            <button type="button" className="btn-secondary btn-mini" data-action="export" onClick={onExport}>Export</button>
           </div>
         </div>
       )}

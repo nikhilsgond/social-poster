@@ -12,12 +12,18 @@ interface CalendarProps {
   onAddPost: (defaults?: Partial<Post>) => void;
   onJumpToTable: (postId: string, platform: Platform) => void;
   onMovePost?: (postId: string, newDate: string) => void;
-  onSync: (preset: CalendarSyncPreset) => void;
+  onSync: (request: CalendarSyncRequest) => void;
   monthSync: CalendarMonthSyncState;
 }
 
 export type CalendarSyncStatus = "pending" | "running" | "succeeded" | "partial" | "failed" | "unavailable";
-export type CalendarSyncPreset = "today" | "7d" | "month";
+export type CalendarSyncPreset = "7d" | "30d" | "90d" | "custom" | "all";
+
+export interface CalendarSyncRequest {
+  preset: CalendarSyncPreset;
+  startDate?: string;
+  endDate?: string;
+}
 
 export interface CalendarPlatformSyncState {
   status: CalendarSyncStatus;
@@ -78,7 +84,21 @@ export const Calendar: React.FC<CalendarProps> = ({
   const hoverCloseTimer = useRef<number | null>(null);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
-  const [syncPreset, setSyncPreset] = useState<CalendarSyncPreset>("month");
+  const [syncPreset, setSyncPreset] = useState<CalendarSyncPreset>("30d");
+  const [syncStartDate, setSyncStartDate] = useState("");
+  const [syncEndDate, setSyncEndDate] = useState("");
+  const customSyncDays = syncStartDate && syncEndDate
+    ? Math.floor((Date.parse(syncEndDate) - Date.parse(syncStartDate)) / 86400000) + 1
+    : 0;
+  const customSyncError = syncPreset === "custom"
+    ? !syncStartDate || !syncEndDate
+      ? "Choose both dates."
+      : syncStartDate > syncEndDate
+        ? "From date cannot be after To date."
+        : customSyncDays > 366
+          ? "Custom sync is limited to 366 days. Use Sync All for full history."
+        : ""
+    : "";
 
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
@@ -287,12 +307,24 @@ export const Calendar: React.FC<CalendarProps> = ({
             })}
           </div>
         )}
-        <select className="cal-sync-preset" value={syncPreset} onChange={(event) => setSyncPreset(event.target.value as CalendarSyncPreset)} disabled={monthSync.running} aria-label="Sync date range">
-          <option value="today">Today</option>
-          <option value="7d">Last 7 Days</option>
-          <option value="month">Current Month</option>
-        </select>
-        <button className="btn-secondary cal-sync-button" type="button" onClick={() => onSync(syncPreset)} disabled={monthSync.running}>
+        <div className="cal-sync-controls">
+          <div className="cal-sync-options" aria-label="Sync date range">
+            {(["7d", "30d", "90d", "custom", "all"] as CalendarSyncPreset[]).map((preset) => (
+              <button key={preset} type="button" className={syncPreset === preset ? "active" : ""} onClick={() => setSyncPreset(preset)} disabled={monthSync.running}>
+                {preset === "custom" ? "Custom" : preset === "all" ? "Sync All" : `${preset.slice(0, -1)} Days`}
+              </button>
+            ))}
+          </div>
+          {syncPreset === "custom" && (
+            <div className="cal-sync-custom">
+              <label>From <input type="date" value={syncStartDate} onChange={(event) => setSyncStartDate(event.target.value)} disabled={monthSync.running} /></label>
+              <span>→</span>
+              <label>To <input type="date" value={syncEndDate} onChange={(event) => setSyncEndDate(event.target.value)} disabled={monthSync.running} /></label>
+              {customSyncError && <small>{customSyncError}</small>}
+            </div>
+          )}
+        </div>
+        <button className="btn-secondary cal-sync-button" type="button" onClick={() => onSync({ preset: syncPreset, startDate: syncStartDate, endDate: syncEndDate })} disabled={monthSync.running || Boolean(customSyncError)}>
           {monthSync.running ? "Syncing…" : "Sync"}
         </button>
       </div>

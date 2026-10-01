@@ -5,7 +5,7 @@
 // Part of Phase 1: Metrics Synchronization.
 
 import type { Post } from "../../types";
-import type { MetricProvider, MetricResult, FetchedMetrics, MetricsSyncScope, DiscoveryResult } from "../interface";
+import type { MetricProvider, MetricResult, FetchedMetrics, MetricsSyncScope, DiscoveryResult, DiscoveredPost } from "../interface";
 import { logInfo, logError } from "../../lib/logger";
 import { inScope, isOlderThanScope, looksLikePlatformAuthFailure, numberMetric, publicProviderError } from "./shared";
 
@@ -159,14 +159,13 @@ export class InstagramMetricsProvider implements MetricProvider {
     return true; // We test by making a real call in fetchMetrics
   }
 
-  async discoverPosts(scope: MetricsSyncScope): Promise<DiscoveryResult> {
+  async discoverPosts(scope: MetricsSyncScope, onBatch?: (posts: DiscoveredPost[]) => Promise<void>): Promise<DiscoveryResult> {
     const fields = "id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,like_count,comments_count";
-    const params = new URLSearchParams({
-      fields,
-      limit: "100",
-      since: String(Math.floor(Date.parse(scope.startTime) / 1000)),
-      until: String(Math.floor(Date.parse(scope.endTimeExclusive) / 1000)),
-    });
+    const params = new URLSearchParams({ fields, limit: "100" });
+    if (!scope.allHistory) {
+      params.set("since", String(Math.floor(Date.parse(scope.startTime) / 1000)));
+      params.set("until", String(Math.floor(Date.parse(scope.endTimeExclusive) / 1000)));
+    }
     let nextUrl: string | undefined = `${IG_BASE_URL}/${encodeURIComponent(this.userId)}/media?${params.toString()}`;
     const posts: DiscoveryResult["posts"] = [];
 
@@ -185,12 +184,13 @@ export class InstagramMetricsProvider implements MetricProvider {
         const body = JSON.parse(bodyText);
         const page = Array.isArray(body.data) ? body.data : [];
         let reachedOlder = false;
+        const pagePosts: DiscoveredPost[] = [];
         for (const item of page) {
           if (!item.id || !item.timestamp) continue;
           if (isOlderThanScope(item.timestamp, scope)) reachedOlder = true;
           if (!inScope(item.timestamp, scope)) continue;
           const mediaType = String(item.media_product_type || item.media_type || "POST").toUpperCase();
-          posts.push({
+          pagePosts.push({
             platform: "ig",
             platformPostId: String(item.id),
             publishedAt: new Date(item.timestamp).toISOString(),
@@ -204,6 +204,8 @@ export class InstagramMetricsProvider implements MetricProvider {
             },
           });
         }
+        if (onBatch && pagePosts.length) await onBatch(pagePosts);
+        else posts.push(...pagePosts);
         nextUrl = reachedOlder ? undefined : body.paging?.next;
       }
       return { success: true, posts };
