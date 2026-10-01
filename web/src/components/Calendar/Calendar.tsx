@@ -18,8 +18,10 @@ interface CalendarProps {
 
 export type CalendarSyncStatus = "pending" | "running" | "succeeded" | "partial" | "failed" | "unavailable";
 export type CalendarSyncPreset = "7d" | "30d" | "90d" | "custom" | "all";
+export type CalendarSyncPlatform = MetricsSyncPlatform | "all";
 
 export interface CalendarSyncRequest {
+  platform: CalendarSyncPlatform;
   preset: CalendarSyncPreset;
   startDate?: string;
   endDate?: string;
@@ -84,6 +86,7 @@ export const Calendar: React.FC<CalendarProps> = ({
   const hoverCloseTimer = useRef<number | null>(null);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [syncPlatform, setSyncPlatform] = useState<CalendarSyncPlatform>("all");
   const [syncPreset, setSyncPreset] = useState<CalendarSyncPreset>("30d");
   const [syncStartDate, setSyncStartDate] = useState("");
   const [syncEndDate, setSyncEndDate] = useState("");
@@ -308,12 +311,25 @@ export const Calendar: React.FC<CalendarProps> = ({
           </div>
         )}
         <div className="cal-sync-controls">
-          <div className="cal-sync-options" aria-label="Sync date range">
-            {(["7d", "30d", "90d", "custom", "all"] as CalendarSyncPreset[]).map((preset) => (
-              <button key={preset} type="button" className={syncPreset === preset ? "active" : ""} onClick={() => setSyncPreset(preset)} disabled={monthSync.running}>
-                {preset === "custom" ? "Custom" : preset === "all" ? "Sync All" : `${preset.slice(0, -1)} Days`}
-              </button>
-            ))}
+          <div className="cal-sync-option-row">
+            <span>Platform</span>
+            <div className="cal-sync-options" aria-label="Sync platform">
+              {(["all", "ig", "th", "fb", "yt"] as CalendarSyncPlatform[]).map((platform) => (
+                <button key={platform} type="button" className={syncPlatform === platform ? "active" : ""} onClick={() => setSyncPlatform(platform)} disabled={monthSync.running}>
+                  {platform === "all" ? "All" : platformDataMap[platform].name}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="cal-sync-option-row">
+            <span>Range</span>
+            <div className="cal-sync-options" aria-label="Sync date range">
+              {(["7d", "30d", "90d", "custom", "all"] as CalendarSyncPreset[]).map((preset) => (
+                <button key={preset} type="button" className={syncPreset === preset ? "active" : ""} onClick={() => setSyncPreset(preset)} disabled={monthSync.running}>
+                  {preset === "custom" ? "Custom" : preset === "all" ? "Sync All" : `${preset.slice(0, -1)} Days`}
+                </button>
+              ))}
+            </div>
           </div>
           {syncPreset === "custom" && (
             <div className="cal-sync-custom">
@@ -324,7 +340,7 @@ export const Calendar: React.FC<CalendarProps> = ({
             </div>
           )}
         </div>
-        <button className="btn-secondary cal-sync-button" type="button" onClick={() => onSync({ preset: syncPreset, startDate: syncStartDate, endDate: syncEndDate })} disabled={monthSync.running || Boolean(customSyncError)}>
+        <button className="btn-secondary cal-sync-button" type="button" onClick={() => onSync({ platform: syncPlatform, preset: syncPreset, startDate: syncStartDate, endDate: syncEndDate })} disabled={monthSync.running || Boolean(customSyncError)}>
           {monthSync.running ? "Syncing…" : "Sync"}
         </button>
       </div>

@@ -17,6 +17,7 @@ export interface MetricsSyncScope {
   endTimeExclusive: string;
   timeZone: string;
   platform?: MetricsSyncPlatform;
+  platforms?: MetricsSyncPlatform[];
   allHistory?: boolean;
 }
 

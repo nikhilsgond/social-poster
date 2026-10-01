@@ -187,9 +187,22 @@ function postChangesToDbRow(changes: Partial<Post>): Record<string, unknown> {
 // ── Repository Functions ──
 
 export async function fetchPosts(): Promise<Post[]> {
-  const { data, error } = await supabase.from("posts").select("*").order("created_at", { ascending: false });
-  if (error) throw error;
-  return (data || []).map(dbRowToPost);
+  // Supabase caps each response; fetch every page before replacing UI state.
+  // UUID breaks created_at ties so page boundaries have a stable order.
+  const pageSize = 500;
+  const posts: Post[] = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await supabase
+      .from("posts")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .range(offset, offset + pageSize - 1);
+    if (error) throw error;
+    const rows = data || [];
+    posts.push(...rows.map(dbRowToPost));
+    if (rows.length < pageSize) return posts;
+  }
 }
 
 export async function fetchPost(id: string): Promise<Post | null> {

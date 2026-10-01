@@ -14,6 +14,11 @@ import { mergeMetrics } from "./providers/shared";
 import { dedupeDiscoveredPosts } from "./identity";
 
 const PLATFORM_ORDER: MetricsSyncPlatform[] = ["ig", "th", "fb", "yt"];
+const SYNC_DIAGNOSTICS = process.env.NODE_ENV !== "production" || process.env.METRICS_SYNC_DIAGNOSTICS === "true";
+
+function logInstagramReconciliation(message: string, meta: Record<string, unknown>): void {
+  if (SYNC_DIAGNOSTICS) logInfo(message, meta);
+}
 
 function minuteBoundary(): string {
   const now = new Date();
@@ -177,7 +182,9 @@ export class SyncMetricsService {
       errors: [],
     };
     const capturedAt = minuteBoundary();
-    const platforms = scope.platform ? [scope.platform] : PLATFORM_ORDER;
+    const platforms = scope.platforms?.length
+      ? PLATFORM_ORDER.filter((platform) => scope.platforms!.includes(platform))
+      : scope.platform ? [scope.platform] : PLATFORM_ORDER;
 
     for (const platform of platforms) {
       const result = emptyPlatformResult();
@@ -205,6 +212,13 @@ export class SyncMetricsService {
         let stopForPlatformFailure = false;
         const processBatch = async (batch: DiscoveredPost[]) => {
           const discovered = dedupeDiscoveredPosts(batch, seenIdentities);
+          if (platform === "ig") {
+            logInstagramReconciliation("Instagram reconciliation batch received", {
+              received: batch.length,
+              unique: discovered.length,
+              duplicateIdentities: batch.length - discovered.length,
+            });
+          }
           if (!discovered.length) return;
 
           result.discovered += discovered.length;
@@ -212,7 +226,10 @@ export class SyncMetricsService {
           result.existing += existing.size;
 
           for (const item of discovered) {
-            if (existing.has(item.platformPostId)) continue;
+            if (existing.has(item.platformPostId)) {
+              if (platform === "ig") logInstagramReconciliation("Instagram discovery matched existing row", { platformPostId: item.platformPostId });
+              continue;
+            }
             const insertRow = metadataRow(item, scope.timeZone);
             if (item.metrics?.views !== undefined) insertRow.views = item.metrics.views;
             if (item.metrics?.likes !== undefined) insertRow.likes = item.metrics.likes;
@@ -236,6 +253,7 @@ export class SyncMetricsService {
             }
             existing.set(item.platformPostId, normalizedPost(data));
             result.added++;
+            if (platform === "ig") logInstagramReconciliation("Instagram discovered post inserted", { platformPostId: item.platformPostId, postId: data.id });
           }
 
           let latestSnapshots = new Map<string, { shares: number; platformMetrics: Record<string, unknown> }>();
@@ -247,7 +265,10 @@ export class SyncMetricsService {
 
           for (const item of discovered) {
             const post = existing.get(item.platformPostId);
-            if (!post) continue;
+            if (!post) {
+              if (platform === "ig") logInstagramReconciliation("Instagram discovered post skipped", { platformPostId: item.platformPostId, reason: "no reconciled database row" });
+              continue;
+            }
             if (stopForPlatformFailure) {
               result.failed++;
               continue;
@@ -257,6 +278,7 @@ export class SyncMetricsService {
             if (!item.metricsComplete) {
               const fetched = await provider.fetchMetrics(post, item.metrics);
               if (!fetched.success) {
+                if (platform === "ig") logInstagramReconciliation("Instagram discovered post metrics skipped", { platformPostId: item.platformPostId, postId: post.id, reason: fetched.error || "provider metrics fetch failed" });
                 result.failed++;
                 result.errors.push("Metrics could not be refreshed for a discovered post.");
                 if (fetched.platformUnavailable) {
@@ -287,7 +309,7 @@ export class SyncMetricsService {
             updateRow.metrics_updated_at = new Date().toISOString();
             const { error: updateError } = await supabaseServer.from("posts").update(updateRow).eq("id", post.id);
             if (updateError) {
-              logError("Discovered post reconciliation failed", { platform, postId: post.id, error: updateError.message });
+              logError("Discovered post reconciliation failed", { platform, platformPostId: item.platformPostId, postId: post.id, error: updateError.message });
               result.failed++;
               result.errors.push("A discovered post could not be updated.");
               continue;
@@ -296,6 +318,7 @@ export class SyncMetricsService {
             try {
               await upsertSnapshot(post.id, platform, capturedAt, effective);
               result.updated++;
+              if (platform === "ig") logInstagramReconciliation("Instagram discovered post reconciled", { platformPostId: item.platformPostId, postId: post.id, contentType: item.contentType });
             } catch (err: any) {
               logError("Metric snapshot persistence failed", { platform, postId: post.id, error: err.message });
               result.snapshotFailures++;

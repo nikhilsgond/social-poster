@@ -216,7 +216,11 @@ const server = http.createServer(async (req, res) => {
       const startTime = url.searchParams.get("startTime") || "";
       const endTimeExclusive = url.searchParams.get("endTimeExclusive") || "";
       const timeZone = url.searchParams.get("timeZone") || "";
-      const platform = url.searchParams.get("platform") || undefined;
+      const legacyPlatform = url.searchParams.get("platform") || undefined;
+      const requestedPlatforms = Array.from(new Set([
+        ...url.searchParams.getAll("platforms").flatMap((value) => value.split(",")),
+        ...(legacyPlatform ? [legacyPlatform] : []),
+      ].map((value) => value.trim()).filter(Boolean)));
       let validTimeZone = true;
       try { new Intl.DateTimeFormat("en", { timeZone }).format(); } catch { validTimeZone = false; }
       if (!validTimeZone || (!allHistory && (!startDate || !endDateExclusive || !Number.isFinite(Date.parse(startTime)) || !Number.isFinite(Date.parse(endTimeExclusive))))) {
@@ -235,9 +239,9 @@ const server = http.createServer(async (req, res) => {
           return;
         }
       }
-      if (platform && !METRICS_SYNC_PLATFORMS.has(platform)) {
+      if (requestedPlatforms.some((platform) => !METRICS_SYNC_PLATFORMS.has(platform))) {
         res.writeHead(400, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "platform must be one of ig, th, fb, or yt." }));
+        res.end(JSON.stringify({ error: "platforms must contain only ig, th, fb, or yt." }));
         return;
       }
 
@@ -288,7 +292,9 @@ const server = http.createServer(async (req, res) => {
         startTime: allHistory ? "" : new Date(startTime).toISOString(),
         endTimeExclusive: allHistory ? new Date().toISOString() : new Date(endTimeExclusive).toISOString(),
         timeZone,
-        platform: platform as "ig" | "th" | "fb" | "yt" | undefined,
+        platforms: requestedPlatforms.length
+          ? requestedPlatforms as ("ig" | "th" | "fb" | "yt")[]
+          : undefined,
         allHistory,
       });
 

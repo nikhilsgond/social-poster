@@ -11,6 +11,19 @@ import { inScope, isOlderThanScope, looksLikePlatformAuthFailure, numberMetric, 
 
 // ── Instagram Graph API host (same as the publishing client) ──
 const IG_BASE_URL = "https://graph.instagram.com/v26.0";
+const IG_SYNC_DIAGNOSTICS = process.env.NODE_ENV !== "production" || process.env.METRICS_SYNC_DIAGNOSTICS === "true";
+
+function logInstagramDiscovery(message: string, meta: Record<string, unknown>): void {
+  if (IG_SYNC_DIAGNOSTICS) logInfo(message, meta);
+}
+
+export function normalizeInstagramContentType(mediaProductType: unknown, mediaType: unknown): string {
+  const normalized = String(mediaProductType || mediaType || "POST").toUpperCase();
+  return normalized === "REELS" ? "Reel"
+    : normalized === "CAROUSEL_ALBUM" ? "Carousel"
+      : normalized === "STORY" ? "Story"
+        : "Post";
+}
 
 // ── Metrics we attempt to fetch for all Instagram media types ──
 const COMMON_METRICS = [
@@ -168,12 +181,19 @@ export class InstagramMetricsProvider implements MetricProvider {
     }
     let nextUrl: string | undefined = `${IG_BASE_URL}/${encodeURIComponent(this.userId)}/media?${params.toString()}`;
     const posts: DiscoveryResult["posts"] = [];
+    let pageNumber = 0;
 
     try {
       while (nextUrl) {
+        pageNumber += 1;
         const response = await fetch(nextUrl, { headers: { Authorization: `Bearer ${this.accessToken}` } });
         const bodyText = await response.text();
         if (!response.ok) {
+          logError("Instagram discovery API request failed", {
+            page: pageNumber,
+            status: response.status,
+            platformUnavailable: looksLikePlatformAuthFailure(response.status, bodyText),
+          });
           return {
             success: false,
             posts,
@@ -183,18 +203,43 @@ export class InstagramMetricsProvider implements MetricProvider {
         }
         const body = JSON.parse(bodyText);
         const page = Array.isArray(body.data) ? body.data : [];
+        logInstagramDiscovery("Instagram discovery page received", {
+          page: pageNumber,
+          fetched: page.length,
+          hasNextPage: Boolean(body.paging?.next),
+        });
         let reachedOlder = false;
         const pagePosts: DiscoveredPost[] = [];
         for (const item of page) {
-          if (!item.id || !item.timestamp) continue;
+          const diagnostic = {
+            page: pageNumber,
+            platformPostId: item.id ? String(item.id) : undefined,
+            mediaType: item.media_type,
+            mediaProductType: item.media_product_type,
+            timestamp: item.timestamp,
+          };
+          if (!item.id || !item.timestamp) {
+            logInstagramDiscovery("Instagram discovery item skipped", {
+              ...diagnostic,
+              reason: !item.id ? "missing platform post ID" : "missing timestamp",
+            });
+            continue;
+          }
+          const platformPostId = String(item.id);
           if (isOlderThanScope(item.timestamp, scope)) reachedOlder = true;
-          if (!inScope(item.timestamp, scope)) continue;
-          const mediaType = String(item.media_product_type || item.media_type || "POST").toUpperCase();
+          if (!inScope(item.timestamp, scope)) {
+            logInstagramDiscovery("Instagram discovery item skipped", {
+              ...diagnostic,
+              reason: isOlderThanScope(item.timestamp, scope) ? "older than requested range" : "outside requested range",
+            });
+            continue;
+          }
+          const contentType = normalizeInstagramContentType(item.media_product_type, item.media_type);
           pagePosts.push({
             platform: "ig",
-            platformPostId: String(item.id),
+            platformPostId,
             publishedAt: new Date(item.timestamp).toISOString(),
-            contentType: mediaType === "REELS" ? "Reel" : mediaType === "CAROUSEL_ALBUM" ? "Carousel" : mediaType === "STORY" ? "Story" : "Post",
+            contentType,
             caption: item.caption || undefined,
             mediaUrl: item.thumbnail_url || item.media_url || undefined,
             permalink: item.permalink || undefined,
@@ -203,7 +248,17 @@ export class InstagramMetricsProvider implements MetricProvider {
               comments: numberMetric(item.comments_count),
             },
           });
+          logInstagramDiscovery("Instagram discovery item normalized", {
+            ...diagnostic,
+            contentType,
+          });
         }
+        logInstagramDiscovery("Instagram discovery page processed", {
+          page: pageNumber,
+          fetched: page.length,
+          normalized: pagePosts.length,
+          stoppedAtRangeBoundary: reachedOlder,
+        });
         if (onBatch && pagePosts.length) await onBatch(pagePosts);
         else posts.push(...pagePosts);
         nextUrl = reachedOlder ? undefined : body.paging?.next;

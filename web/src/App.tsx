@@ -162,14 +162,15 @@ function AppContent() {
     }
     const startDate = start ? localDate(start) : undefined;
     const endDateExclusive = end ? localDate(end) : undefined;
-    const pendingResults = Object.fromEntries(METRICS_SYNC_PLATFORMS.map((platform) => [
+    const requestedPlatforms = request.platform === "all" ? METRICS_SYNC_PLATFORMS : [request.platform];
+    const pendingResults = Object.fromEntries(requestedPlatforms.map((platform) => [
       platform,
       { status: "pending", discovered: 0, added: 0, existing: 0, processed: 0, failed: 0, snapshotFailures: 0 } satisfies CalendarPlatformSyncState,
-    ])) as Record<MetricsSyncPlatform, CalendarPlatformSyncState>;
+    ])) as Partial<Record<MetricsSyncPlatform, CalendarPlatformSyncState>>;
     const completedResults: Partial<Record<MetricsSyncPlatform, CalendarPlatformSyncState>> = {};
     setMonthSync({ running: true, monthLabel, results: pendingResults });
 
-    for (const platform of METRICS_SYNC_PLATFORMS) {
+    for (const platform of requestedPlatforms) {
       setMonthSync((current) => ({
         ...current,
         results: { ...current.results, [platform]: { ...current.results[platform]!, status: "running" } },
@@ -181,7 +182,7 @@ function AppContent() {
           startTime: start?.toISOString(),
           endTimeExclusive: end?.toISOString(),
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          platform,
+          platforms: [platform],
         });
         const result = report.platforms[platform];
         const discovered = result?.discovered ?? report.summary.discovered;
@@ -241,13 +242,14 @@ function AppContent() {
     const completed = Object.values(completedResults);
     const successfulPlatforms = completed.filter((result) => result.status === "succeeded").length;
     const attentionPlatforms = completed.length - successfulPlatforms;
+    const syncTarget = request.platform === "all" ? "all supported platforms" : platformDataMap[request.platform].name;
     showToast(
       refreshFailed || attentionPlatforms > 0 ? "Sync completed with details" : "Sync complete",
       refreshFailed
         ? `${monthLabel} was synchronized, but some refreshed data could not be loaded.`
         : attentionPlatforms > 0
           ? `${successfulPlatforms} succeeded; ${attentionPlatforms} need attention. Review the platform results.`
-          : `${monthLabel} metrics were synchronized across all supported platforms.`,
+          : `${monthLabel} metrics were synchronized for ${syncTarget}.`,
       refreshFailed || attentionPlatforms > 0 ? "warning" : "success",
     );
   }, [monthSync.running, refreshPosts, reloadSnapshots, showToast]);

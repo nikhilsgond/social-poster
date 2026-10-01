@@ -3,12 +3,12 @@ import test from "node:test";
 import type { DiscoveredPost } from "./interface";
 import { canonicalSyncIdentity, dedupeDiscoveredPosts } from "./identity";
 
-function discovered(platform: DiscoveredPost["platform"], platformPostId: string, caption: string): DiscoveredPost {
+function discovered(platform: DiscoveredPost["platform"], platformPostId: string, caption: string, contentType = "Post"): DiscoveredPost {
   return {
     platform,
     platformPostId,
     publishedAt: "2026-06-01T12:00:00.000Z",
-    contentType: "Post",
+    contentType,
     caption,
   };
 }
@@ -16,9 +16,9 @@ function discovered(platform: DiscoveredPost["platform"], platformPostId: string
 test("same caption on Instagram, Facebook, and Threads remains three identities", () => {
   const caption = "Learn this Excel trick...";
   const posts = [
-    discovered("ig", "IG123", caption),
-    discovered("fb", "FB456", caption),
-    discovered("th", "TH789", caption),
+    discovered("ig", "IG123", caption, "Reel"),
+    discovered("fb", "FB456", caption, "Reel"),
+    discovered("th", "TH789", caption, "Video"),
   ];
 
   assert.equal(new Set(posts.map(canonicalSyncIdentity)).size, 3);

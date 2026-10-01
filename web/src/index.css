@@ -110,10 +110,12 @@ main#mainArea { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; sc
 .cal-sync-result.is-failed > b { color: var(--error); }
 .cal-sync-result.is-running { border-color: #666; }
 .cal-sync-controls { display: flex; flex-direction: column; gap: 6px; }
+.cal-sync-option-row { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; gap: 6px; }
+.cal-sync-option-row > span { color: var(--muted); font-size: .6rem; font-weight: 700; }
 .cal-sync-options { display: flex; flex-wrap: wrap; gap: 4px; }
 .cal-sync-options button { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-alt); color: var(--muted); font: inherit; font-size: .64rem; font-weight: 700; cursor: pointer; }
 .cal-sync-options button.active { border-color: var(--text); color: var(--text); }
-.cal-sync-custom { display: flex; align-items: end; gap: 6px; }
+.cal-sync-custom { display: flex; align-items: end; gap: 6px; margin-left: 50px; }
 .cal-sync-custom label { color: var(--muted); font-size: .62rem; }
 .cal-sync-custom input { display: block; margin-top: 2px; padding: 5px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel-alt); color: var(--text); font: inherit; font-size: .64rem; }
 .cal-sync-custom small { color: var(--error); font-size: .6rem; }

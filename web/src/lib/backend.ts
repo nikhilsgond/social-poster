@@ -47,12 +47,13 @@ export interface MetricsSyncRequest {
   startTime?: string;
   endTimeExclusive?: string;
   timeZone: string;
-  platform: MetricsSyncPlatform;
+  platforms: MetricsSyncPlatform[];
   allHistory?: boolean;
 }
 
 export async function syncMetrics(request: MetricsSyncRequest): Promise<MetricsSyncReport> {
-  const params = new URLSearchParams({ timeZone: request.timeZone, platform: request.platform });
+  const params = new URLSearchParams({ timeZone: request.timeZone });
+  request.platforms.forEach((platform) => params.append("platforms", platform));
   if (request.allHistory) {
     params.set("all", "true");
   } else {
