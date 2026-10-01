@@ -10,6 +10,8 @@ export interface CloudinaryUploadResult {
   resource_type: string;
   format: string;
   bytes: number;
+  width?: number;
+  height?: number;
 }
 
 export interface CloudinaryConfig {
@@ -61,6 +63,8 @@ export async function uploadToCloudinary(
     resource_type: data.resource_type || "image",
     format: data.format || "",
     bytes: data.bytes || file.size,
+    width: data.width,
+    height: data.height,
   };
 }
 

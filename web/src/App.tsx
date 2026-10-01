@@ -11,6 +11,7 @@ import { Calendar } from "./components/Calendar/Calendar";
 import type { CalendarMonthSyncState, CalendarPlatformSyncState, CalendarSyncRequest } from "./components/Calendar/Calendar";
 import { Tables, getFilteredSortedPosts } from "./components/Tables/Tables";
 import { Metrics } from "./components/Metrics/Metrics";
+import { MediaUpload } from "./components/MediaUpload/MediaUpload";
 import { CreatePostWorkflow } from "./components/CreatePost/CreatePostWorkflow";
 import { StrategyWorkflow } from "./components/CreatePost/StrategyWorkflow";
 import { BulkImportModal } from "./components/BulkImport/BulkImportModal";
@@ -25,7 +26,7 @@ import { exportRecordsToCSV, filterPostsForExport, toExportRecords } from "./lib
 import type { ExportPostRecord, ExportRangeType } from "./lib/exportPosts";
 import "./index.css";
 
-type View = "calendar" | "tables" | "metrics";
+type View = "calendar" | "tables" | "metrics" | "media-upload";
 type ExportType = "json" | "csv" | "print";
 
 const PLATFORMS: Platform[] = ["yt", "ig", "fb", "th", "li", "x"];
@@ -686,9 +687,9 @@ function AppContent() {
         </div>
 
         <nav className="view-nav">
-          {(["calendar", "tables", "metrics"] as View[]).map((item) => (
+          {(["calendar", "tables", "metrics", "media-upload"] as View[]).map((item) => (
             <button key={item} type="button" className={view === item ? "active" : ""} onClick={() => switchView(item)}>
-              {item.charAt(0).toUpperCase() + item.slice(1)}
+              {item === "media-upload" ? "Media Upload" : item.charAt(0).toUpperCase() + item.slice(1)}
             </button>
           ))}
         </nav>
@@ -696,6 +697,9 @@ function AppContent() {
 
       <main id="mainArea">
         <div className="view-panel">
+          <div hidden={view !== "media-upload"} className={view !== "media-upload" ? "hidden" : ""}>
+            <MediaUpload />
+          </div>
           {/* ── Calendar View ── */}
           {view === "calendar" && !loading && (
             <>
