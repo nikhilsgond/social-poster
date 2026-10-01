@@ -24,6 +24,8 @@ export interface ThreadsPublishResult {
   error?: string | null;
 }
 
+export type ThreadsMediaType = "TEXT" | "IMAGE" | "VIDEO";
+
 // ── Threads API Error ──
 
 export class ThreadsApiError extends Error {
@@ -78,17 +80,27 @@ export class ThreadsGraphClient {
   }
 
   // ── Create media container ──
-  // POST /{userId}/threads with media_type=TEXT and text=<content>.
+  // POST /{userId}/threads with media_type plus text and, for media posts,
+  // the public image_url or video_url that Threads fetches directly.
 
   async createMediaContainer(
     caption: string,
     mediaUrl?: string,
-    contentType?: string
+    contentType: ThreadsMediaType = "TEXT"
   ): Promise<ThreadsContainerResult> {
     const params: Record<string, string> = {
-      media_type: contentType || "TEXT",
-      text: caption,
+      media_type: contentType,
     };
+
+    if (caption) params.text = caption;
+
+    if (contentType === "IMAGE") {
+      if (!mediaUrl) return { success: false, error: "Threads Image requires a media URL" };
+      params.image_url = mediaUrl;
+    } else if (contentType === "VIDEO") {
+      if (!mediaUrl) return { success: false, error: "Threads Video requires a media URL" };
+      params.video_url = mediaUrl;
+    }
 
     try {
       const data = await this.request(

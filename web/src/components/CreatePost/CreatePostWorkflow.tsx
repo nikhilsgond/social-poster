@@ -369,7 +369,7 @@ export const CreatePostWorkflow: React.FC<CreatePostWorkflowProps> = ({
                         <><label>Caption</label><textarea value={destination.caption} onChange={(event) => updateDestination(destination.key, { caption: event.target.value })} /></>
                       )}
                       {(destination.platform === "th" || destination.platform === "fb") && (
-                        <><label>Content{destination.platform === "th" || destination.contentType === "Text" ? " *" : ""}</label><textarea value={destination.content} onChange={(event) => updateDestination(destination.key, { content: event.target.value })} /></>
+                        <><label>Content{destination.contentType === "Text" ? " *" : ""}</label><textarea value={destination.content} onChange={(event) => updateDestination(destination.key, { content: event.target.value })} /></>
                       )}
                       {destination.platform === "yt" && (
                         <><label>Description</label><textarea value={destination.description} onChange={(event) => updateDestination(destination.key, { description: event.target.value })} /></>

@@ -1,7 +1,6 @@
 // server/src/platforms/publishers/threads.ts
 // Real Threads publisher.
-// Uses the Threads Graph API client to publish text posts. Although the API
-// supports media, this repository's client does not yet send media URL params.
+// Uses the Threads Graph API client to publish text, image, and video posts.
 // The Threads client (src/lib/threads.ts) is completely isolated from the
 // Facebook and Instagram clients — separate host, endpoints, tokens, and errors.
 // Respects the existing scheduled_at scheduling semantics.
@@ -9,18 +8,15 @@
 
 import type { Post } from "../../types";
 import type { PlatformPublisher, PublishResult } from "./interface";
-import { ThreadsGraphClient } from "../../lib/threads";
+import { ThreadsGraphClient, type ThreadsMediaType } from "../../lib/threads";
 import { logInfo, logError } from "../../lib/logger";
 import { getContentTypeCapability, validatePlatformPostCapability } from "../../platform-capabilities";
 
 // ── Threads media_type mapping ──
-// The capability map intentionally exposes only TEXT until media URL parameters
-// are implemented. Unsupported values are rejected rather than converted.
-
-function mapToThreadsMediaType(contentType: string | undefined): string {
+function mapToThreadsMediaType(contentType: string | undefined): ThreadsMediaType {
   const capability = getContentTypeCapability("th", contentType);
   if (!capability) throw new Error(`Unsupported Threads content type: ${contentType || "(empty)"}`);
-  return capability.backendType;
+  return capability.backendType as ThreadsMediaType;
 }
 
 export class ThreadsPublisher implements PlatformPublisher {

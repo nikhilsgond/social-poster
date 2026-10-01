@@ -66,10 +66,12 @@ export const PLATFORM_CAPABILITIES: Readonly<Record<PublishingPlatform, Platform
     name: "Threads",
     contentTypes: [
       { name: "Text", backendType: "TEXT", mediaType: "none", mediaRequired: false },
+      { name: "Image", backendType: "IMAGE", mediaType: "image", mediaRequired: true },
+      { name: "Video", backendType: "VIDEO", mediaType: "video", mediaRequired: true },
     ],
     fields: {
-      title: "unsupported", caption: "optional", content: "required", description: "unsupported",
-      tags: "unsupported", mediaUrl: "unsupported", date: "required-for-scheduling", time: "required-for-scheduling",
+      title: "unsupported", caption: "optional", content: "optional", description: "unsupported",
+      tags: "unsupported", mediaUrl: "optional", date: "required-for-scheduling", time: "required-for-scheduling",
     },
     nativeFutureScheduling: false,
     immediatePublishing: true,
@@ -77,7 +79,8 @@ export const PLATFORM_CAPABILITIES: Readonly<Record<PublishingPlatform, Platform
     limits: {},
     legacyContentTypeAliases: {},
     restrictions: [
-      "The current Threads API client does not send image_url or video_url, so only text posts are currently publishable.",
+      "Text posts require content and cannot include media.",
+      "Image and Video posts require a publicly accessible media URL; caption/content is optional.",
       "Future posts are held by Social Planner and published when due; Threads native scheduling is not used.",
     ],
   },
@@ -188,7 +191,7 @@ export function validatePlatformPostCapability(input: CapabilityPostInput): {
   if (type.mediaType === "none" && input.mediaUrl?.trim()) {
     errors.push(`${type.name} does not support media with the current publisher.`);
   }
-  if (platform === "th" && !input.content?.trim() && !input.caption?.trim()) {
+  if (platform === "th" && type.name === "Text" && !input.content?.trim() && !input.caption?.trim()) {
     errors.push("Threads Text requires content.");
   }
   if (platform === "fb" && type.name === "Text" && !input.content?.trim()) {
