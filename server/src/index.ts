@@ -101,7 +101,12 @@ const server = http.createServer(async (req, res) => {
     try {
       const result = await runDuePostWorker();
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(result));
+      res.end(JSON.stringify({
+        ok: result.ok,
+        due: result.due,
+        published: result.published,
+        failed: result.failed,
+      }));
     } catch (err: any) {
       logError("Due-post worker failed", { error: err.message });
       res.writeHead(500, { "Content-Type": "application/json" });
