@@ -88,7 +88,7 @@ function syncUrlState(state: Record<string, string | number | boolean | undefine
 // ── Main App Content ──
 function AppContent() {
   const { showToast } = useToast();
-  const { state, dispatch, addPost, addPostDetailed, updatePost, deletePost, movePost, refreshPosts, undo, redo, canUndo, canRedo, setEditPost } = usePostContext();
+  const { state, dispatch, addPost, addPostDetailed, updatePost, deletePost, movePost, refreshPosts, rebuildPostsCache, rebuildingPostsCache, undo, redo, canUndo, canRedo, setEditPost } = usePostContext();
   const { posts, selectedPosts, editPostId, loading, error } = state;
 
   // ── View state ──
@@ -237,7 +237,10 @@ function AppContent() {
       }
     }
 
-    const refreshResults = await Promise.allSettled([refreshPosts(), reloadSnapshots()]);
+    const refreshResults = await Promise.allSettled([refreshPosts({
+      platforms: requestedPlatforms, startDate, endDateExclusive,
+      startTime: start?.toISOString(), endTimeExclusive: end?.toISOString(),
+    }), reloadSnapshots()]);
     setMonthSync((current) => ({ ...current, running: false }));
     const refreshFailed = refreshResults.some((result) => result.status === "rejected");
     const completed = Object.values(completedResults);
@@ -664,6 +667,10 @@ function AppContent() {
           <span className="storage-dot" />
           <span className="storage-label">Supabase</span>
         </span>
+        <button type="button" className="btn-secondary btn-mini" disabled={loading || rebuildingPostsCache || monthSync.running}
+          onClick={() => void rebuildPostsCache().catch(() => showToast("Cache rebuild failed", "Could not refresh posts from Supabase. Please retry.", "error"))}>
+          {rebuildingPostsCache ? "Rebuilding cache…" : "Rebuild Posts Cache"}
+        </button>
         <span className="brand-sub">Content calendar</span>
 
         <nav className="month-nav">

@@ -4,8 +4,10 @@
 // This keeps all database code centralized and out of components.
 
 import { supabase } from "./supabase";
-import type { Post, MetricSnapshot, DateRange } from "../types/post";
+import type { Post, MetricSnapshot, DateRange, Platform } from "../types/post";
 import { buildScheduledAt, normalizePost } from "./validation";
+
+const POST_SELECTION = "*,latest_metrics:post_metric_snapshots(shares,captured_at)";
 
 // ── Date Range Helpers ──
 export function computeDateRange(type: "7d" | "30d" | "90d" | "custom", startDate?: string, endDate?: string): DateRange {
@@ -71,7 +73,7 @@ export async function fetchPostSnapshots(postId: string): Promise<MetricSnapshot
 // Maps Supabase snake_case columns to the application's camelCase Post model.
 
 function dbRowToPost(row: any): Post {
-  return normalizePost({
+  return { ...normalizePost({
     id: row.id,
     platform: row.platform,
     contentType: row.content_type,
@@ -100,7 +102,9 @@ function dbRowToPost(row: any): Post {
     permalink: row.permalink,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-  });
+  }), metricsUpdatedAt: row.metrics_updated_at,
+    shares: row.latest_metrics?.[0]?.shares ?? row.shares ?? 0,
+  };
 }
 
 // ── Application Post → Supabase Row ──
@@ -186,18 +190,51 @@ function postChangesToDbRow(changes: Partial<Post>): Record<string, unknown> {
 
 // ── Repository Functions ──
 
-export async function fetchPosts(): Promise<Post[]> {
+export interface PostsRefreshScope {
+  platforms: Platform[];
+  startDate?: string;
+  endDateExclusive?: string;
+  startTime?: string;
+  endTimeExclusive?: string;
+}
+
+interface PostsFetchOptions {
+  changedSince?: string;
+  scope?: PostsRefreshScope;
+}
+
+export async function fetchPosts(options: PostsFetchOptions = {}): Promise<Post[]> {
   // Supabase caps each response; fetch every page before replacing UI state.
   // UUID breaks created_at ties so page boundaries have a stable order.
   const pageSize = 500;
   const posts: Post[] = [];
   for (let offset = 0; ; offset += pageSize) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("posts")
-      .select("*")
+      .select(POST_SELECTION)
+      .order("captured_at", { referencedTable: "latest_metrics", ascending: false })
+      .limit(1, { referencedTable: "latest_metrics" })
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
       .range(offset, offset + pageSize - 1);
+    if (options.changedSince) {
+      // Include ALL active rows plus lifecycle/metric changes, even when a
+      // scheduled post was published while this browser was closed.
+      const since = new Date(options.changedSince).toISOString();
+      query = query.or(`status.neq.published,created_at.gte.${since},updated_at.gte.${since},published_at.gte.${since},metrics_updated_at.gte.${since}`);
+    }
+    if (options.scope) {
+      const scope = options.scope;
+      query = query.in("platform", scope.platforms);
+      // Sync operates on publication time. Keep date-only legacy rows too.
+      if (scope.startTime && scope.endTimeExclusive && scope.startDate && scope.endDateExclusive) {
+        query = query.or(`and(published_at.gte.${scope.startTime},published_at.lt.${scope.endTimeExclusive}),and(published_at.is.null,date.gte.${scope.startDate},date.lt.${scope.endDateExclusive})`);
+      } else {
+        if (scope.startDate) query = query.gte("date", scope.startDate);
+        if (scope.endDateExclusive) query = query.lt("date", scope.endDateExclusive);
+      }
+    }
+    const { data, error } = await query;
     if (error) throw error;
     const rows = data || [];
     posts.push(...rows.map(dbRowToPost));
@@ -206,28 +243,36 @@ export async function fetchPosts(): Promise<Post[]> {
 }
 
 export async function fetchPost(id: string): Promise<Post | null> {
-  const { data, error } = await supabase.from("posts").select("*").eq("id", id).single();
+  const { data, error } = await supabase.from("posts").select(POST_SELECTION).eq("id", id)
+    .order("captured_at", { referencedTable: "latest_metrics", ascending: false })
+    .limit(1, { referencedTable: "latest_metrics" }).single();
   if (error) return null;
   return dbRowToPost(data);
 }
 
 export async function createPost(post: Omit<Post, "id" | "createdAt" | "updatedAt">): Promise<Post> {
   const row = postToDbRow(post);
-  const { data, error } = await supabase.from("posts").insert(row).select().single();
+  const { data, error } = await supabase.from("posts").insert(row).select(POST_SELECTION)
+    .order("captured_at", { referencedTable: "latest_metrics", ascending: false })
+    .limit(1, { referencedTable: "latest_metrics" }).single();
   if (error) throw error;
   return dbRowToPost(data);
 }
 
 export async function createPosts(posts: Omit<Post, "id" | "createdAt" | "updatedAt">[]): Promise<Post[]> {
   const rows = posts.map(postToDbRow);
-  const { data, error } = await supabase.from("posts").insert(rows).select();
+  const { data, error } = await supabase.from("posts").insert(rows).select(POST_SELECTION)
+    .order("captured_at", { referencedTable: "latest_metrics", ascending: false })
+    .limit(1, { referencedTable: "latest_metrics" });
   if (error) throw error;
   return (data || []).map(dbRowToPost);
 }
 
 export async function updatePost(id: string, changes: Partial<Post>): Promise<Post | null> {
   const row = postChangesToDbRow(changes);
-  const { data, error } = await supabase.from("posts").update(row).eq("id", id).select().single();
+  const { data, error } = await supabase.from("posts").update(row).eq("id", id).select(POST_SELECTION)
+    .order("captured_at", { referencedTable: "latest_metrics", ascending: false })
+    .limit(1, { referencedTable: "latest_metrics" }).single();
   if (error) throw error;
   return dbRowToPost(data);
 }
@@ -252,7 +297,9 @@ export async function movePost(id: string, newDate: string): Promise<Post | null
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)
-    .select()
+    .select(POST_SELECTION)
+    .order("captured_at", { referencedTable: "latest_metrics", ascending: false })
+    .limit(1, { referencedTable: "latest_metrics" })
     .single();
   if (error) throw error;
   return dbRowToPost(data);

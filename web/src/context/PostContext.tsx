@@ -4,9 +4,8 @@
 // Persists to Supabase via the repository layer (supabasePosts.ts).
 // Phase 4: Supabase is the source of truth.
 
-import { createContext, useContext, useReducer, useEffect, useCallback } from "react";
+import { createContext, useContext, useReducer, useEffect, useCallback, useRef, useState } from "react";
 import {
-  fetchPosts,
   fetchPost,
   createPost,
   createPosts,
@@ -14,7 +13,9 @@ import {
   deletePost as supabaseDeletePost,
   movePost as supabaseMovePost,
   formatSupabaseError,
+  type PostsRefreshScope,
 } from "../lib/supabasePosts";
+import { cachePostChanges, loadPostsWithCache, mergePosts, refreshScopedPosts } from "../lib/postsLoading";
 import type { Post } from "../types/post";
 import { useToast } from "../components/common/Toast";
 import { NativeSubmissionError, submitNativePost } from "../lib/backend";
@@ -38,6 +39,7 @@ export type PostAction =
   | { type: "MOVE_POST"; payload: { id: string; newDate: string } }
   | { type: "CLEAR_POSTS" }
   | { type: "SET_POSTS"; payload: Post[] }
+  | { type: "MERGE_POSTS"; payload: Post[] }
   | { type: "SET_LOADING"; payload: boolean }
   | { type: "SET_ERROR"; payload: string | null }
   | { type: "SELECT_TOGGLE"; payload: string }
@@ -71,7 +73,9 @@ interface PostContextType {
   deletePost: (id: string) => Promise<void>;
   bulkAddPosts: (posts: NewPost[]) => Promise<Post[]>;
   movePost: (id: string, newDate: string) => Promise<void>;
-  refreshPosts: () => Promise<void>;
+  refreshPosts: (scope?: PostsRefreshScope) => Promise<void>;
+  rebuildPostsCache: () => Promise<void>;
+  rebuildingPostsCache: boolean;
   clearPosts: () => void;
   toggleSelect: (id: string) => void;
   setSelectedPosts: (posts: Record<string, boolean>) => void;
@@ -88,6 +92,8 @@ const PostContext = createContext<PostContextType | null>(null);
 
 function postReducer(state: PostState, action: PostAction): PostState {
   switch (action.type) {
+    case "MERGE_POSTS":
+      return { ...state, posts: mergePosts(state.posts, action.payload) };
     case "SET_POSTS":
       return {
         ...state,
@@ -178,6 +184,9 @@ function postReducer(state: PostState, action: PostAction): PostState {
 
 export function PostProvider({ children }: { children: React.ReactNode }) {
   const { showToast } = useToast();
+  const cacheWarningShown = useRef(false);
+  const rebuilding = useRef(false);
+  const [rebuildingPostsCache, setRebuildingPostsCache] = useState(false);
   const [state, dispatch] = useReducer(postReducer, {
     posts: [],
     selectedPosts: {},
@@ -188,29 +197,65 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
     historyIndex: 0,
   });
 
-  const loadPosts = useCallback(async (showLoading: boolean) => {
+  const warnCacheUnavailable = useCallback(() => {
+    if (cacheWarningShown.current) return;
+    cacheWarningShown.current = true;
+    showToast("Posts cache unavailable", "Posts still load from Supabase. Use Rebuild Posts Cache to retry local storage.", "warning");
+  }, [showToast]);
+
+  const persistChanges = useCallback(async (posts: Post[], deletedId?: string) => {
+    if (!await cachePostChanges(posts, deletedId)) warnCacheUnavailable();
+  }, [warnCacheUnavailable]);
+
+  const loadPosts = useCallback(async (showLoading: boolean, rebuild = false) => {
     if (showLoading) dispatch({ type: "SET_LOADING", payload: true });
     dispatch({ type: "SET_ERROR", payload: null });
     try {
-      const loaded = await fetchPosts();
-      dispatch({ type: "SET_POSTS", payload: loaded });
+      const loaded = await loadPostsWithCache(showLoading ? (cached) => dispatch({ type: "SET_POSTS", payload: cached }) : undefined, rebuild);
+      // A failed live refresh must retain any active data already on screen.
+      if (!loaded.error) dispatch({ type: "SET_POSTS", payload: loaded.posts });
+      if (loaded.cacheUnavailable) warnCacheUnavailable();
+      if (loaded.error) throw loaded.error;
     } catch (err: any) {
       dispatch({ type: "SET_ERROR", payload: formatSupabaseError(err) });
       if (showLoading) dispatch({ type: "SET_LOADING", payload: false });
       throw err;
     }
-  }, []);
+  }, [warnCacheUnavailable]);
 
-  // Initial load and later authoritative refreshes share the same fetch path.
+  // Historical records render from IndexedDB; Supabase supplies live changes.
   useEffect(() => {
     loadPosts(true)
       .then(() => dispatch({ type: "PUSH_SNAPSHOT" }))
       .catch(() => undefined);
   }, [loadPosts]);
 
-  const refreshPosts = useCallback(async () => {
-    await loadPosts(false);
-  }, [loadPosts]);
+  const refreshPosts = useCallback(async (scope?: PostsRefreshScope) => {
+    if (!scope) { await loadPosts(false); return; }
+    dispatch({ type: "SET_ERROR", payload: null });
+    try {
+      const refreshed = await refreshScopedPosts(scope);
+      dispatch({ type: "MERGE_POSTS", payload: refreshed.posts });
+      if (refreshed.cacheUnavailable) warnCacheUnavailable();
+    } catch (error) {
+      dispatch({ type: "SET_ERROR", payload: formatSupabaseError(error) });
+      throw error;
+    }
+  }, [loadPosts, warnCacheUnavailable]);
+
+  const rebuildPostsCache = useCallback(async () => {
+    if (rebuilding.current) return;
+    rebuilding.current = true;
+    setRebuildingPostsCache(true);
+    cacheWarningShown.current = false;
+    try {
+      await loadPosts(false, true);
+      if (!cacheWarningShown.current) showToast("Posts cache rebuilt", "Published history and live posts have been refreshed.", "success");
+    } finally {
+      rebuilding.current = false;
+      setRebuildingPostsCache(false);
+    }
+  }, [loadPosts, showToast]);
 
   // Action wrappers — all go through Supabase
   const finalizeNativePost = useCallback(async (post: Post, notify = true): Promise<AddPostDetailedResult> => {
@@ -236,9 +281,10 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
     dispatch({ type: "PUSH_SNAPSHOT" });
     const newPost = await createPost(postData);
     const result = await finalizeNativePost(newPost, false);
+    await persistChanges([result.post]);
     dispatch({ type: "ADD_POST", payload: result.post });
     return result;
-  }, [finalizeNativePost]);
+  }, [finalizeNativePost, persistChanges]);
 
   const addPost = useCallback(async (postData: NewPost) => {
     try {
@@ -255,24 +301,26 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
       dispatch({ type: "PUSH_SNAPSHOT" });
       const updated = await updatePost(id, changes);
       if (updated) {
+        await persistChanges([updated]);
         dispatch({ type: "UPDATE_POST", payload: updated });
         showToast("Post updated", "Post has been updated.", "success");
       }
     } catch (err: any) {
       showToast("Error", formatSupabaseError(err), "error");
     }
-  }, [showToast]);
+  }, [showToast, persistChanges]);
 
   const deletePostFn = useCallback(async (id: string) => {
     try {
       dispatch({ type: "PUSH_SNAPSHOT" });
       await supabaseDeletePost(id);
+      await persistChanges([], id);
       dispatch({ type: "DELETE_POST", payload: id });
       showToast("Post deleted", "Post removed.", "info");
     } catch (err: any) {
       showToast("Error", formatSupabaseError(err), "error");
     }
-  }, [showToast]);
+  }, [showToast, persistChanges]);
 
   const bulkAddPostsFn = useCallback(async (posts: NewPost[]): Promise<Post[]> => {
     try {
@@ -283,6 +331,7 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
         finalized.push((await finalizeNativePost(post)).post);
       }
       if (finalized.length) {
+        await persistChanges(finalized);
         dispatch({ type: "BULK_ADD_POSTS", payload: finalized });
         showToast("Import complete", `${finalized.length} posts imported.`, "success");
       }
@@ -291,20 +340,21 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
       showToast("Error", formatSupabaseError(err), "error");
       return [];
     }
-  }, [finalizeNativePost, showToast]);
+  }, [finalizeNativePost, showToast, persistChanges]);
 
   const movePostFn = useCallback(async (id: string, newDate: string) => {
     try {
       dispatch({ type: "PUSH_SNAPSHOT" });
       const updated = await supabaseMovePost(id, newDate);
       if (updated) {
-        dispatch({ type: "MOVE_POST", payload: { id, newDate: updated.date } });
+        await persistChanges([updated]);
+        dispatch({ type: "UPDATE_POST", payload: updated });
         showToast("Post moved", `Post moved to ${newDate}.`, "success");
       }
     } catch (err: any) {
       showToast("Error", formatSupabaseError(err), "error");
     }
-  }, [showToast]);
+  }, [showToast, persistChanges]);
 
   const setEditPost = useCallback((id: string | null) => {
     dispatch({ type: "SET_EDIT_POST", payload: id });
@@ -328,6 +378,7 @@ export function PostProvider({ children }: { children: React.ReactNode }) {
       state, posts: state.posts, dispatch,
       addPost, addPostDetailed, updatePost: updatePostFn, deletePost: deletePostFn,
       bulkAddPosts: bulkAddPostsFn, movePost: movePostFn, refreshPosts,
+      rebuildPostsCache, rebuildingPostsCache,
       clearPosts: () => dispatch({ type: "CLEAR_POSTS" }),
       toggleSelect,
       setSelectedPosts,
