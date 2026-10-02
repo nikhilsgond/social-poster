@@ -16,7 +16,7 @@ import {
 } from "./createPostWorkflow";
 
 export const BULK_JSON_SCHEMA_VERSION = 1;
-export const MAX_BULK_JSON_POSTS = 10;
+export const MAX_BULK_JSON_POSTS = 100;
 
 const ROOT_FIELDS = new Set(["schemaVersion", "posts"]);
 const POST_FIELDS = new Set([
