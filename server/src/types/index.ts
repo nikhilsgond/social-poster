@@ -20,6 +20,7 @@ export interface Post {
   time: string;
   scheduledAt?: string;
   mediaUrl?: string | null;
+  mediaUrls?: string[] | null;
   cloudinaryPublicId?: string | null;
   socialUrl?: string | null;
   mediaCleanedAt?: string | null;

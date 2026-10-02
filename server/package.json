@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsc",
-    "test": "tsx --test src/lib/youtube.test.ts",
+    "test": "tsx --test src/lib/youtube.test.ts src/lib/facebook.test.ts",
     "start": "tsx src/index.ts"
   },
   "dependencies": {

@@ -7,7 +7,9 @@ import type { Post } from "./types";
 import { DatabaseError } from "./lib/errors";
 import { NATIVE_SCHEDULING_PLATFORMS } from "./platform-capabilities";
 
-const DUE_POST_WORKER_PLATFORMS = ["ig", "th"] as const;
+// Facebook native posts with an accepted platform ID must never be republished.
+// Unsubmitted/due Facebook posts also need the existing immediate publish path.
+const DUE_POST_FILTER = "platform.in.(ig,th),and(platform.eq.fb,platform_post_id.is.null)";
 
 // ── Get due posts (scheduled and past their scheduled time) ──
 
@@ -18,7 +20,7 @@ export async function getDuePosts(): Promise<Post[]> {
       .from("posts")
       .select("*")
       .eq("status", "scheduled")
-      .in("platform", DUE_POST_WORKER_PLATFORMS)
+      .or(DUE_POST_FILTER)
       .not("scheduled_at", "is", null)
       .lte("scheduled_at", now)
       .order("scheduled_at", { ascending: true });
@@ -58,7 +60,7 @@ export async function claimDuePostForPublishing(id: string): Promise<Post | null
       .update({ status: "publishing", updated_at: now, error_message: null })
       .eq("id", id)
       .eq("status", "scheduled")
-      .in("platform", DUE_POST_WORKER_PLATFORMS)
+      .or(DUE_POST_FILTER)
       .not("scheduled_at", "is", null)
       .lte("scheduled_at", now)
       .select()
@@ -145,7 +147,7 @@ export async function updatePublishingResult(
 
 // ── Update publishing error ──
 
-export async function updatePublishingError(id: string, errorMessage: string): Promise<Post | null> {
+export async function updatePublishingError(id: string, errorMessage: string, platformPostId?: string | null): Promise<Post | null> {
   try {
     const { data, error } = await supabaseServer
       .from("posts")
@@ -153,6 +155,7 @@ export async function updatePublishingError(id: string, errorMessage: string): P
         status: "failed",
         error_message: errorMessage,
         updated_at: new Date().toISOString(),
+        ...(platformPostId ? { platform_post_id: platformPostId } : {}),
       })
       .eq("id", id)
       .eq("status", "publishing")
@@ -248,6 +251,7 @@ function normalizeRow(row: any): Post {
     time: row.time,
     scheduledAt: row.scheduled_at ?? undefined,
     mediaUrl: row.media_url ?? null,
+    mediaUrls: row.media_urls ?? null,
     cloudinaryPublicId: row.cloudinary_public_id ?? null,
     socialUrl: row.social_url ?? null,
     mediaCleanedAt: row.media_cleaned_at ?? null,

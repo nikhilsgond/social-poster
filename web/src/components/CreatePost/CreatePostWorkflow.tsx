@@ -14,6 +14,7 @@ import {
   destinationToPost,
   findDuplicateConflicts,
   normalizeSourceIdentity,
+  multipleImagesSource,
   sanitizeProcessError,
   validateDestination,
   validateRemoteMediaUrl,
@@ -28,6 +29,7 @@ import {
   validateMediaFile,
 } from "../../lib/cloudinary";
 import { CreateWorkflowTabs, type CreateWorkflowMode } from "./CreateWorkflowTabs";
+import { MultipleImagesSource } from "./MultipleImagesSource";
 
 interface CreatePostWorkflowProps {
   posts: Post[];
@@ -40,7 +42,7 @@ interface CreatePostWorkflowProps {
 }
 
 type Step = "content" | "platforms" | "details" | "review" | "results";
-type ContentMode = "text" | "upload" | "url";
+type ContentMode = "text" | "upload" | "url" | "multiple-images";
 
 const STEPS: { key: Step; label: string }[] = [
   { key: "content", label: "Content" },
@@ -71,6 +73,7 @@ export const CreatePostWorkflow: React.FC<CreatePostWorkflowProps> = ({
   const [step, setStep] = useState<Step>("content");
   const [contentMode, setContentMode] = useState<ContentMode>("text");
   const [media, setMedia] = useState<CreateMediaSource | null>(null);
+  const [images, setImages] = useState<CreateMediaSource[]>([]);
   const [mediaUrlInput, setMediaUrlInput] = useState("");
   const [mediaPreview, setMediaPreview] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -82,8 +85,9 @@ export const CreatePostWorkflow: React.FC<CreatePostWorkflowProps> = ({
   const [processing, setProcessing] = useState(false);
   const [results, setResults] = useState<DestinationProcessResult[]>([]);
 
-  const activeMedia = contentMode === "text" ? null : media;
-  const options = useMemo(() => compatibleDestinations(activeMedia?.type || null), [activeMedia?.type]);
+  const multipleMedia = useMemo(() => multipleImagesSource(images), [images]);
+  const activeMedia = contentMode === "text" ? null : contentMode === "multiple-images" ? multipleMedia : media;
+  const options = useMemo(() => compatibleDestinations(activeMedia?.type || null, contentMode === "multiple-images"), [activeMedia?.type, contentMode]);
   const conflicts = useMemo(
     () => findDuplicateConflicts(destinations, activeMedia, posts),
     [destinations, activeMedia, posts],
@@ -91,7 +95,7 @@ export const CreatePostWorkflow: React.FC<CreatePostWorkflowProps> = ({
   const currentStepIndex = STEPS.findIndex((item) => item.key === step);
 
   const selectMode = (mode: ContentMode) => {
-    if (processing) return;
+    if (processing || uploading) return;
     setContentMode(mode);
     setContentError("");
   };
@@ -149,6 +153,10 @@ export const CreatePostWorkflow: React.FC<CreatePostWorkflowProps> = ({
   };
 
   const goToPlatforms = () => {
+    if (contentMode === "multiple-images" && images.length < 2) {
+      setContentError("Upload at least two images before continuing.");
+      return;
+    }
     if (contentMode !== "text" && !media) {
       setContentError(contentMode === "upload" ? "Upload media successfully before continuing." : "Validate the media URL before continuing.");
       return;
@@ -253,6 +261,7 @@ export const CreatePostWorkflow: React.FC<CreatePostWorkflowProps> = ({
   };
 
   const renderMediaPreview = () => {
+    if (contentMode === "multiple-images") return null;
     if (!activeMedia || !mediaPreview) return null;
     return (
       <div className="create-media-preview">
@@ -295,6 +304,7 @@ export const CreatePostWorkflow: React.FC<CreatePostWorkflowProps> = ({
                 <button type="button" className={contentMode === "text" ? "active" : ""} onClick={() => selectMode("text")}>Text only</button>
                 <button type="button" className={contentMode === "upload" ? "active" : ""} onClick={() => selectMode("upload")}>Upload media</button>
                 <button type="button" className={contentMode === "url" ? "active" : ""} onClick={() => selectMode("url")}>Public media URL</button>
+                <button type="button" className={contentMode === "multiple-images" ? "active" : ""} onClick={() => selectMode("multiple-images")}>Facebook Multiple Images</button>
               </div>
 
               {contentMode === "text" && <div className="create-note">Text-only content can be sent to Threads Text or Facebook Text. Enter the platform-specific text later.</div>}
@@ -329,6 +339,10 @@ export const CreatePostWorkflow: React.FC<CreatePostWorkflowProps> = ({
               {contentError && <div className="create-errors">{contentError}</div>}
             </div>
           )}
+
+          <div hidden={step !== "content" || contentMode !== "multiple-images"}>
+            <MultipleImagesSource onChange={setImages} onBusy={setUploading} />
+          </div>
 
           {step === "platforms" && (
             <div>
@@ -402,7 +416,9 @@ export const CreatePostWorkflow: React.FC<CreatePostWorkflowProps> = ({
                   return (
                     <section className="review-card" key={destination.key}>
                       <div className="destination-card-title"><PlatformIcon platform={destination.platform} iconOnly /><strong>{platformDataMap[destination.platform].name} · {destination.contentType}</strong></div>
-                      {activeMedia && <div className="review-media">{activeMedia.type === "image" ? <img src={activeMedia.url} alt="" /> : <video src={activeMedia.url} preload="metadata" />}</div>}
+                      {activeMedia && <div className="review-media">{activeMedia.items
+                        ? activeMedia.items.map((image, index) => <img key={`${index}-${image.url}`} src={image.url} alt={`Image ${index + 1}`} />)
+                        : activeMedia.type === "image" ? <img src={activeMedia.url} alt="" /> : <video src={activeMedia.url} preload="metadata" />}</div>}
                       <p>{previewText(destination)}</p>
                       <dl><div><dt>Date</dt><dd>{destination.date}</dd></div><div><dt>Time</dt><dd>{destination.time}</dd></div><div><dt>Action</dt><dd>{destinationActionLabel(action)}</dd></div></dl>
                     </section>

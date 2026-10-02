@@ -7,6 +7,7 @@ export interface ContentTypeCapability {
   backendType: string;
   mediaType: RequiredMediaType;
   mediaRequired: boolean;
+  multipleImages?: boolean;
 }
 
 export interface PlatformCapability {
@@ -89,6 +90,8 @@ export const PLATFORM_CAPABILITIES: Readonly<Record<PublishingPlatform, Platform
     contentTypes: [
       { name: "Text", backendType: "TEXT", mediaType: "none", mediaRequired: false },
       { name: "Image", backendType: "IMAGE", mediaType: "image", mediaRequired: true },
+      { name: "Multiple Images", backendType: "MULTIPLE_IMAGES", mediaType: "image", mediaRequired: true, multipleImages: true },
+      { name: "Reel", backendType: "REELS", mediaType: "video", mediaRequired: true },
     ],
     fields: {
       title: "unsupported", caption: "optional", content: "optional", description: "unsupported",
@@ -102,7 +105,10 @@ export const PLATFORM_CAPABILITIES: Readonly<Record<PublishingPlatform, Platform
     restrictions: [
       "Text posts require content and cannot include media.",
       "Image posts require a publicly accessible image URL; caption/content is optional.",
-      "Video, Reel, Story, and Link publishing are not implemented by the current Facebook client.",
+      "Multiple Images requires at least two public image URLs, in display order.",
+      "Reel requires one public video URL; Meta processing and encoding requirements apply.",
+      "Text, Image, Multiple Images and Reel use native Facebook future scheduling.",
+      "Video, Story, and Link publishing are not implemented by the current Facebook client.",
     ],
   },
   yt: {
@@ -162,6 +168,7 @@ export interface CapabilityPostInput {
   caption?: string | null;
   content?: string | null;
   mediaUrl?: string | null;
+  mediaUrls?: unknown;
 }
 
 export function validatePlatformPostCapability(input: CapabilityPostInput): {
@@ -185,7 +192,23 @@ export function validatePlatformPostCapability(input: CapabilityPostInput): {
   if (input.contentType !== type.name) {
     warnings.push(`Legacy contentType "${input.contentType}" is normalized to "${type.name}".`);
   }
-  if (type.mediaRequired && !input.mediaUrl?.trim()) {
+  if (platform === "fb" && type.multipleImages) {
+    if (input.mediaUrl?.trim()) errors.push("Multiple Images uses mediaUrls, not mediaUrl.");
+    if (!Array.isArray(input.mediaUrls)) errors.push("Multiple Images requires a mediaUrls array.");
+    else {
+      if (input.mediaUrls.length < 2) errors.push("Multiple Images requires at least 2 image URLs.");
+      input.mediaUrls.forEach((value, index) => {
+        try {
+          if (typeof value !== "string" || !value.trim()) throw new Error();
+          const url = new URL(value);
+          if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error();
+        } catch { errors.push(`mediaUrls[${index}] must be a valid HTTP/HTTPS URL.`); }
+      });
+    }
+  } else if (platform === "fb" && input.mediaUrls != null) {
+    errors.push(`${type.name} does not support mediaUrls; use mediaUrl for single media.`);
+  }
+  if (type.mediaRequired && !type.multipleImages && !input.mediaUrl?.trim()) {
     errors.push(`${type.name} requires a mediaUrl.`);
   }
   if (type.mediaType === "none" && input.mediaUrl?.trim()) {

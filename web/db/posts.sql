@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS public.posts (
 
   -- Media (Cloudinary references, NOT Supabase Storage)
   media_url TEXT,
+  media_urls TEXT[],
   cloudinary_public_id TEXT,
   social_url TEXT,
   media_cleaned_at TIMESTAMPTZ,

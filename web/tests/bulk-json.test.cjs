@@ -176,3 +176,152 @@ test("previews and progressively processes all 100 rows, preserving independent 
   assert.deepEqual(processingFlags, [true, false]);
   assert.ok(button("Done"));
 });
+
+const facebook = (contentType, changes = {}) => ({ platform: "fb", contentType, content: "Caption", date: "2099-01-01", time: "09:30", ...changes });
+const imageUrls = ["https://cdn.example/second.jpg", "https://cdn.example/first.jpg"];
+const facebookLoader = () => loader({ fetch: async (url) => ({ ok: true, headers: new Headers({ "content-type": url.endsWith(".mp4") ? "video/mp4" : "image/jpeg" }) }) });
+
+test("Create Post and Bulk JSON accept exactly the four Facebook types and retain ordered media", async () => {
+  const load = facebookLoader();
+  const { validateBulkJson } = load("../src/lib/bulkJsonWorkflow.ts");
+  const { destinationToPost, compatibleDestinations, validateDestination } = load("../src/lib/createPostWorkflow.ts");
+  const accepted = await validateBulkJson(documentFor([
+    facebook("Text"), facebook("Image", { mediaUrl: imageUrls[0] }),
+    facebook("Multiple Images", { mediaUrls: imageUrls }), facebook("Reel", { mediaUrl: "https://cdn.example/reel.mp4" }),
+  ]), []);
+  assert.equal(accepted.valid, true, accepted.rows.map((row) => row.errors.join(" ")).join(" "));
+  assert.ok(accepted.rows.every((row) => row.action === "facebook-native-scheduled"));
+  const posts = accepted.rows.map((row) => destinationToPost(row.destination, row.media));
+  assert.deepEqual(Array.from(posts[2].mediaUrls), imageUrls);
+  assert.equal(posts[2].mediaUrl, null);
+  assert.equal(posts[1].mediaUrl, imageUrls[0]);
+  assert.equal(posts[3].mediaUrl, "https://cdn.example/reel.mp4");
+  assert.ok(accepted.rows.every((row) => !validateDestination(row.destination, row.media).errors.length));
+  assert.deepEqual(Array.from(compatibleDestinations("image", true), (option) => option.key), ["fb:Multiple Images"]);
+  assert.ok(compatibleDestinations("video").some((option) => option.key === "fb:Reel"));
+  assert.ok(!compatibleDestinations("image").some((option) => option.contentType === "Multiple Images"));
+  for (const type of ["Video", "Story Image", "Story Video", "Unknown"]) {
+    assert.equal((await validateBulkJson(documentFor([facebook(type, { mediaUrl: imageUrls[0] })]), [])).valid, false);
+  }
+});
+
+test("Facebook media cardinality, field and actual media-type validation reject malformed inputs", async () => {
+  const { validateBulkJson } = facebookLoader()("../src/lib/bulkJsonWorkflow.ts");
+  const invalid = [
+    facebook("Multiple Images"), facebook("Multiple Images", { mediaUrls: imageUrls[0] }),
+    facebook("Multiple Images", { mediaUrls: [] }), facebook("Multiple Images", { mediaUrls: [imageUrls[0]] }),
+    facebook("Multiple Images", { mediaUrls: [imageUrls[0], "https://cdn.example/video.mp4"] }),
+    facebook("Multiple Images", { mediaUrls: [imageUrls[0], "file:///bad.jpg"] }),
+    facebook("Multiple Images", { mediaUrls: [imageUrls[0], 5] }),
+    facebook("Multiple Images", { mediaUrls: imageUrls, mediaUrl: imageUrls[0] }),
+    facebook("Reel", { mediaUrl: imageUrls[0] }), facebook("Reel", { mediaUrls: imageUrls }),
+    facebook("Image", { mediaUrl: "https://cdn.example/video.mp4" }),
+    facebook("Image", { mediaUrl: imageUrls[0], mediaUrls: imageUrls }),
+    facebook("Text", { mediaUrls: imageUrls }),
+    entry(1, { mediaUrls: imageUrls }),
+  ];
+  const result = await validateBulkJson(documentFor(invalid), []);
+  assert.equal(result.valid, false);
+  assert.ok(result.rows.every((row) => row.errors.length));
+});
+
+test("Multiple Images duplicate identity uses normalized URLs in order, including persisted posts", async () => {
+  const load = facebookLoader();
+  const { validateBulkJson } = load("../src/lib/bulkJsonWorkflow.ts");
+  const { destinationToPost, duplicateIdentity } = load("../src/lib/createPostWorkflow.ts");
+  const first = facebook("Multiple Images", { mediaUrls: imageUrls });
+  const normalized = facebook("Multiple Images", { mediaUrls: ["https://CDN.example/second.jpg#preview", imageUrls[1]] });
+  const same = await validateBulkJson(documentFor([first, normalized]), []);
+  assert.equal(same.valid, false);
+  assert.ok(same.rows.every((row) => row.errors.some((error) => /Duplicates/.test(error))));
+  const reordered = await validateBulkJson(documentFor([first, { ...first, mediaUrls: [...imageUrls].reverse() }]), []);
+  assert.equal(reordered.valid, true);
+  const prior = { ...destinationToPost(reordered.rows[0].destination, reordered.rows[0].media), id: "prior", status: "scheduled" };
+  const existing = await validateBulkJson(documentFor([normalized]), [prior]);
+  assert.match(existing.rows[0].errors.join(" "), /existing scheduled post prior/);
+  assert.notEqual(duplicateIdentity(reordered.rows[0].destination, null, imageUrls), duplicateIdentity(reordered.rows[0].destination, null, [imageUrls[0], "https://cdn.example/another.jpg"]));
+});
+
+test("ordered media arrays round-trip through persistence while old single-media rows remain valid", async () => {
+  let written;
+  const query = { insert(row) { written = row; return this; }, select() { return this; }, order() { return this; }, limit() { return this; },
+    async single() { return { data: { ...written, id: "persisted", created_at: "now", updated_at: "now" }, error: null }; } };
+  const { createPost } = loader({ "./supabase": { supabase: { from() { return query; } } } })("../src/lib/supabasePosts.ts");
+  const multi = await createPost({ ...facebook("Multiple Images"), status: "scheduled", mediaUrl: null, mediaUrls: imageUrls });
+  assert.deepEqual(written.media_urls, imageUrls);
+  assert.deepEqual(multi.mediaUrls, imageUrls);
+  const image = await createPost({ ...facebook("Image"), status: "scheduled", mediaUrl: imageUrls[0] });
+  assert.equal(Object.hasOwn(written, "media_urls"), false);
+  assert.equal(image.mediaUrl, imageUrls[0]);
+  assert.equal(image.mediaUrls, null);
+});
+
+test("Facebook immediate claims exclude accepted native posts; ambiguous Reel IDs are persisted", async () => {
+  const calls = [];
+  let updated;
+  const row = { id: "post", platform: "fb", content_type: "Multiple Images", media_urls: imageUrls, status: "scheduled" };
+  const query = {};
+  for (const method of ["select", "eq", "or", "not", "lte", "gt", "is", "in", "order"]) query[method] = (...args) => { calls.push([method, ...args]); return query; };
+  query.update = (value) => { updated = value; return query; };
+  query.maybeSingle = query.single = async () => ({ data: { ...row, ...updated }, error: null });
+  query.then = (resolve, reject) => Promise.resolve({ data: [row], error: null }).then(resolve, reject);
+  const posts = loader({ "./lib/supabase": { supabaseServer: { from() { return query; } } } })("../../server/src/posts.ts");
+  assert.deepEqual(Array.from((await posts.claimDuePostForPublishing("post")).mediaUrls), imageUrls);
+  assert.ok(calls.some((call) => call[0] === "or" && call[1] === "platform.in.(ig,th),and(platform.eq.fb,platform_post_id.is.null)"));
+  calls.length = 0;
+  await posts.claimPostForNativeScheduling("post");
+  assert.ok(calls.some((call) => call[0] === "is" && call[1] === "platform_post_id" && call[2] === null));
+  assert.ok(calls.some((call) => call[0] === "gt" && call[1] === "scheduled_at"));
+  await posts.updatePublishingError("post", "Reel processing pending", "reel-id");
+  assert.equal(updated.platform_post_id, "reel-id");
+  assert.equal(updated.status, "failed");
+});
+
+test("Create Post multi-image input uploads in selection order, previews, removes and rejects videos", async () => {
+  const hooks = [];
+  const effects = [];
+  let cursor = 0;
+  const react = {
+    useRef(initial) { const index = cursor++; if (!(index in hooks)) hooks[index] = { current: initial }; return hooks[index]; },
+    useState(initial) { const index = cursor++; if (!(index in hooks)) hooks[index] = initial; return [hooks[index], (value) => { hooks[index] = typeof value === "function" ? value(hooks[index]) : value; }]; },
+    useEffect(callback, deps) { const index = cursor++; const previous = hooks[index];
+      if (!previous || deps.some((dep, i) => dep !== previous.deps[i])) effects.push(() => { previous?.cleanup?.(); hooks[index] = { deps, cleanup: callback() }; }); },
+  };
+  const originalCreate = URL.createObjectURL, originalRevoke = URL.revokeObjectURL;
+  const revoked = [];
+  const uploads = [];
+  URL.createObjectURL = (file) => `blob:${file.name}`;
+  URL.revokeObjectURL = (url) => revoked.push(url);
+  try {
+    const jsx = (type, props) => ({ type, props });
+    const { MultipleImagesSource } = loader({ react, "react/jsx-runtime": { jsx, jsxs: jsx },
+      "../../lib/cloudinary": {
+        isImageFile: (file) => file.type.startsWith("image/"), validateMediaFile: () => ({ valid: true }),
+        async uploadMediaFile(file) { uploads.push(file.name); return { secure_url: `https://cdn.example/${file.name}`, public_id: file.name }; },
+      },
+    })("../src/components/CreatePost/MultipleImagesSource.tsx");
+    let tree, images;
+    const flags = [];
+    const props = { onChange: (value) => { images = value; }, onBusy: (value) => flags.push(value) };
+    const render = () => { cursor = 0; tree = MultipleImagesSource(props); while (effects.length) effects.shift()(); };
+    const input = () => nodes(tree, (node) => node.type === "input")[0];
+    render();
+    assert.equal(input().props.multiple, true);
+    await input().props.onChange({ target: { files: [{ name: "bad.mp4", type: "video/mp4" }], value: "" } });
+    render();
+    assert.match(text(tree), /images only/);
+    assert.equal(uploads.length, 0);
+    await input().props.onChange({ target: { files: ["third.jpg", "first.jpg", "second.jpg"].map((name) => ({ name, type: "image/jpeg", size: 10 })), value: "" } });
+    render();
+    assert.deepEqual(uploads, ["third.jpg", "first.jpg", "second.jpg"]);
+    assert.deepEqual(Array.from(images, (image) => image.url), uploads.map((name) => `https://cdn.example/${name}`));
+    assert.equal(nodes(tree, (node) => node.type === "img").length, 3);
+    nodes(tree, (node) => node.type === "button" && text(node) === "Remove image 2")[0].props.onClick();
+    render();
+    assert.deepEqual(Array.from(images, (image) => image.url), ["https://cdn.example/third.jpg", "https://cdn.example/second.jpg"]);
+    assert.deepEqual(revoked, ["blob:third.jpg", "blob:first.jpg", "blob:second.jpg"]);
+    assert.deepEqual(flags, [true, false]);
+    hooks.forEach((hook) => hook?.cleanup?.());
+    assert.equal(revoked.length, 3);
+  } finally { URL.createObjectURL = originalCreate; URL.revokeObjectURL = originalRevoke; }
+});

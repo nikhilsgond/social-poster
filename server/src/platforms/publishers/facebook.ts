@@ -1,6 +1,6 @@
 // server/src/platforms/publishers/facebook.ts
 // Real Facebook publisher.
-// Uses the Facebook Graph API client to publish text and images.
+// Uses the Facebook Graph API client for Text, Image, Multiple Images and Reel.
 // Supports native Facebook scheduling.
 // Never logs the Page Access Token.
 
@@ -42,7 +42,11 @@ export class FacebookPublisher implements PlatformPublisher {
     try {
       let result: PublishResult;
 
-      if (contentType.mediaType === "image") {
+      if (contentType.multipleImages) {
+        result = await this.client.publishMultipleImages(post.mediaUrls!, post.caption || post.content || undefined, scheduledPublishTime);
+      } else if (contentType.name === "Reel") {
+        result = await this.client.publishReel(post.mediaUrl!, post.caption || post.content || undefined, scheduledPublishTime);
+      } else if (contentType.mediaType === "image") {
         // Image post
         result = await this.client.publishImage(
           post.mediaUrl!,

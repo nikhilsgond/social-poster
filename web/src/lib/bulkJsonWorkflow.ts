@@ -10,6 +10,7 @@ import {
   findDuplicateConflictsForCandidates,
   validateDestination,
   validateRemoteMediaUrl,
+  multipleImagesSource,
   type CreateMediaSource,
   type DestinationAction,
   type DestinationDraft,
@@ -20,7 +21,7 @@ export const MAX_BULK_JSON_POSTS = 100;
 
 const ROOT_FIELDS = new Set(["schemaVersion", "posts"]);
 const POST_FIELDS = new Set([
-  "platform", "contentType", "mediaUrl", "title", "caption", "content", "description", "date", "time",
+  "platform", "contentType", "mediaUrl", "mediaUrls", "title", "caption", "content", "description", "date", "time",
 ]);
 
 export const BULK_JSON_TEMPLATE = JSON.stringify({
@@ -59,6 +60,7 @@ export interface BulkJsonPreviewRow {
   destination?: DestinationDraft;
   media: CreateMediaSource | null;
   mediaUrl: string;
+  mediaUrls: string[];
   errors: string[];
   warnings: string[];
   action?: DestinationAction;
@@ -142,6 +144,7 @@ export async function validateBulkJson(
       values: { platform: "", contentType: "", title: "", caption: "", content: "", description: "", date: "", time: "" },
       media: null,
       mediaUrl: "",
+      mediaUrls: [],
       errors: [],
       warnings: [],
     };
@@ -157,6 +160,12 @@ export async function validateBulkJson(
     const platformValue = stringField(raw, "platform", preview.errors);
     const contentTypeValue = stringField(raw, "contentType", preview.errors);
     const mediaUrl = stringField(raw, "mediaUrl", preview.errors);
+    let mediaUrls: string[] | undefined;
+    if (raw.mediaUrls !== undefined) {
+      if (!Array.isArray(raw.mediaUrls) || raw.mediaUrls.some((item) => typeof item !== "string")) {
+        preview.errors.push("mediaUrls must be an array of HTTP/HTTPS URL strings.");
+      } else mediaUrls = raw.mediaUrls.map((item: string) => item.trim());
+    }
     const title = stringField(raw, "title", preview.errors);
     const caption = stringField(raw, "caption", preview.errors);
     const content = stringField(raw, "content", preview.errors);
@@ -165,6 +174,7 @@ export async function validateBulkJson(
     const time = stringField(raw, "time", preview.errors);
     preview.values = { platform: platformValue, contentType: contentTypeValue, title, caption, content, description, date, time };
     preview.mediaUrl = mediaUrl;
+    preview.mediaUrls = mediaUrls || [];
 
     if (!platformValue) preview.errors.push("platform is required.");
     if (!contentTypeValue) preview.errors.push("contentType is required.");
@@ -191,12 +201,17 @@ export async function validateBulkJson(
     if (contentTypeValue !== type.name) {
       preview.warnings.push(`Legacy contentType "${contentTypeValue}" is normalized to "${type.name}".`);
     }
+    if (raw.mediaUrls !== undefined && !(platform === "fb" && type.multipleImages)) {
+      preview.errors.push("mediaUrls is supported only for Facebook Multiple Images.");
+    }
+    if (type.multipleImages && mediaUrl) preview.errors.push("Multiple Images uses mediaUrls, not mediaUrl.");
 
     const destination: DestinationDraft = {
       key: `json-row-${index + 1}`,
       platform,
       contentType: type.name,
       mediaType: type.mediaType,
+      ...(mediaUrls ? { mediaUrls } : {}),
       title,
       caption,
       content,
@@ -216,7 +231,24 @@ export async function validateBulkJson(
       preview.errors.push(`${type.name} does not support media with the current publisher.`);
     }
 
-    if (type.mediaType !== "none" && mediaUrl) {
+    if (type.multipleImages && mediaUrls) {
+      const items: CreateMediaSource[] = [];
+      for (const url of mediaUrls) {
+        let promise = mediaCache.get(url);
+        if (!promise) {
+          promise = validateRemoteMediaUrl(url, { allowMediaProbe: false });
+          mediaCache.set(url, promise);
+        }
+        try {
+          const item = await promise;
+          items.push(item);
+          if (item.type !== "image") preview.errors.push("Multiple Images cannot contain video URLs.");
+        } catch (error) {
+          preview.errors.push(error instanceof Error ? error.message : "Image URL could not be verified.");
+        }
+      }
+      preview.media = multipleImagesSource(items);
+    } else if (!type.multipleImages && type.mediaType !== "none" && mediaUrl) {
       let mediaPromise = mediaCache.get(mediaUrl);
       if (!mediaPromise) {
         mediaPromise = validateRemoteMediaUrl(mediaUrl, { allowMediaProbe: false });
@@ -241,7 +273,7 @@ export async function validateBulkJson(
 
   const candidates = rows
     .filter((row): row is BulkJsonPreviewRow & { destination: DestinationDraft } => Boolean(row.destination))
-    .map((row) => ({ destination: row.destination, mediaUrl: row.mediaUrl || null }));
+    .map((row) => ({ destination: row.destination, mediaUrl: row.mediaUrl || null, mediaUrls: row.mediaUrls }));
   const conflicts = findDuplicateConflictsForCandidates(candidates, existingPosts);
   conflicts.forEach((conflict) => {
     const row = rows.find((item) => item.destination?.key === conflict.destinationKey);

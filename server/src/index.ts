@@ -156,7 +156,7 @@ const server = http.createServer(async (req, res) => {
           result.socialUrl ?? ""
         );
       } else {
-        updatedPost = await updatePublishingError(id, result.error ?? "Publishing failed");
+        updatedPost = await updatePublishingError(id, result.error ?? "Publishing failed", result.platformPostId);
       }
 
       res.writeHead(result.success ? 200 : 502, { "Content-Type": "application/json" });
@@ -193,7 +193,7 @@ const server = http.createServer(async (req, res) => {
           result.socialUrl ?? ""
         );
       } else {
-        updatedPost = await updatePublishingError(id, result.error ?? "Scheduling failed");
+        updatedPost = await updatePublishingError(id, result.error ?? "Scheduling failed", result.platformPostId);
       }
 
       res.writeHead(result.success ? 200 : 502, { "Content-Type": "application/json" });

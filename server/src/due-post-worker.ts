@@ -41,6 +41,7 @@ export async function runDuePostWorker(): Promise<DuePostWorkerResult> {
       await updatePublishingError(
         claimedPost.id,
         result.error || "Publish returned no platform post ID",
+        result.platformPostId,
       );
       failed += 1;
     } catch (err: any) {

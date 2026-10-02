@@ -31,6 +31,7 @@ const rowText = (row: BulkJsonPreviewRow) =>
   row.values.title || row.values.caption || row.values.content || row.values.description || "—";
 
 const mediaLabel = (row: BulkJsonPreviewRow) => {
+  if (row.mediaUrls.length) return `${row.mediaUrls.length} image URLs${row.errors.length ? " (check errors)" : ""}`;
   if (!row.mediaUrl) return "None";
   if (row.media) return `${row.media.type === "image" ? "Image" : "Video"} URL`;
   return "Unverified URL";
@@ -146,7 +147,7 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({
               <textarea className="json-code bulk-json-editor" value={jsonText} onChange={(event) => updateJson(event.target.value)} spellCheck={false} aria-label="Bulk scheduling JSON" />
               <details className="bulk-json-schema-help">
                 <summary>Schema fields</summary>
-                <p>Root: <code>schemaVersion</code>, <code>posts</code>. Post: <code>platform</code>, <code>contentType</code>, optional <code>mediaUrl</code>, relevant text fields, <code>date</code>, and <code>time</code>. Unknown fields are rejected.</p>
+                <p>Root: <code>schemaVersion</code>, <code>posts</code>. Post: <code>platform</code>, <code>contentType</code>, optional <code>mediaUrl</code> (single image/video), <code>mediaUrls</code> (Facebook Multiple Images only, at least two image URLs in order), relevant text fields, <code>date</code>, and <code>time</code>. Unknown fields are rejected.</p>
               </details>
             </div>
           )}

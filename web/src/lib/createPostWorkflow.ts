@@ -17,6 +17,7 @@ export interface CreateMediaSource {
   origin: "upload" | "url";
   publicId?: string;
   bytes?: number;
+  items?: CreateMediaSource[];
 }
 
 export interface DestinationOption {
@@ -27,6 +28,7 @@ export interface DestinationOption {
 }
 
 export interface DestinationDraft extends DestinationOption {
+  mediaUrls?: string[];
   title: string;
   caption: string;
   content: string;
@@ -56,6 +58,7 @@ export interface DuplicateConflict {
 export interface DuplicateCandidate {
   destination: DestinationDraft;
   mediaUrl?: string | null;
+  mediaUrls?: string[] | null;
 }
 
 export interface DestinationProcessResult {
@@ -79,11 +82,11 @@ export function normalizeSourceIdentity(value: string): string {
   }
 }
 
-export function compatibleDestinations(mediaType: CreateMediaType | null): DestinationOption[] {
+export function compatibleDestinations(mediaType: CreateMediaType | null, multipleImages = false): DestinationOption[] {
   const requiredType: RequiredMediaType = mediaType || "none";
   return (Object.keys(PLATFORM_CAPABILITIES) as PublishingPlatform[]).flatMap((platform) =>
     PLATFORM_CAPABILITIES[platform].contentTypes
-      .filter((contentType) => contentType.mediaType === requiredType)
+      .filter((contentType) => contentType.mediaType === requiredType && Boolean(contentType.multipleImages) === multipleImages)
       .map((contentType) => ({
         key: `${platform}:${contentType.name}`,
         platform,
@@ -91,6 +94,11 @@ export function compatibleDestinations(mediaType: CreateMediaType | null): Desti
         mediaType: contentType.mediaType,
       })),
   );
+}
+
+export function multipleImagesSource(items: CreateMediaSource[]): CreateMediaSource | null {
+  if (!items.length) return null;
+  return { ...items[0], identity: JSON.stringify(items.map((item) => normalizeSourceIdentity(item.url))), items };
 }
 
 export function createDestinationDraft(option: DestinationOption, initialDate: string): DestinationDraft {
@@ -112,11 +120,20 @@ export function validateDestination(
 ): DestinationValidation {
   const scheduledAt = buildScheduledAt(destination.date, destination.time);
   const capability = PLATFORM_CAPABILITIES[destination.platform];
+  const type = getContentTypeCapability(destination.platform, destination.contentType);
+  const multipleImages = Boolean(type?.multipleImages);
   const validation = validatePlatformPostCapability({
     ...destination,
-    mediaUrl: media?.url || null,
+    mediaUrl: multipleImages ? null : media?.url || null,
+    mediaUrls: multipleImages ? media?.items?.map((item) => item.url) || destination.mediaUrls : destination.mediaUrls,
   });
   const errors = [...validation.errors];
+  if (multipleImages && (!media?.items || media.items.length < 2 || media.items.some((item) => item.type !== "image"))) {
+    errors.push("Multiple Images requires at least 2 validated images.");
+  }
+  if (destination.platform === "fb" && !multipleImages && media && type && media.type !== type.mediaType) {
+    errors.push(`${type.name} requires ${type.mediaType} media.`);
+  }
 
   if (!destination.date) errors.push("Date is required.");
   if (!destination.time) errors.push("Time is required.");
@@ -160,10 +177,14 @@ function destinationText(destination: Pick<DestinationDraft, "title" | "caption"
 export function duplicateIdentity(
   destination: Pick<DestinationDraft, "platform" | "contentType" | "date" | "title" | "caption" | "content" | "description">,
   mediaUrl?: string | null,
+  mediaUrls?: string[] | null,
 ): string | null {
   const capability = getContentTypeCapability(destination.platform, destination.contentType);
   if (!capability || !destination.date) return null;
-  const source = mediaUrl
+  if (capability.multipleImages && (!mediaUrls || mediaUrls.length < 2)) return null;
+  const source = capability.multipleImages
+    ? JSON.stringify(mediaUrls!.map(normalizeSourceIdentity))
+    : mediaUrl
     ? normalizeSourceIdentity(mediaUrl)
     : normalizeSourceIdentity(destinationText(destination));
   if (!source) return null;
@@ -194,7 +215,7 @@ export function findDuplicateConflicts(
   existingPosts: Post[],
 ): DuplicateConflict[] {
   return findDuplicateConflictsForCandidates(
-    destinations.map((destination) => ({ destination, mediaUrl: media?.url })),
+    destinations.map((destination) => ({ destination, mediaUrl: media?.url, mediaUrls: media?.items?.map((item) => item.url) })),
     existingPosts,
   );
 }
@@ -207,8 +228,8 @@ export function findDuplicateConflictsForCandidates(
   const seen = new Map<string, string>();
   const operationConflictKeys = new Set<string>();
 
-  candidates.forEach(({ destination, mediaUrl }) => {
-    const identity = duplicateIdentity(destination, mediaUrl);
+  candidates.forEach(({ destination, mediaUrl, mediaUrls }) => {
+    const identity = duplicateIdentity(destination, mediaUrl, mediaUrls);
     if (!identity) return;
     const first = seen.get(identity);
     if (first) {
@@ -236,12 +257,12 @@ export function findDuplicateConflictsForCandidates(
     .filter((post) => post.status === "scheduled" || post.status === "publishing" || post.status === "published")
     .forEach((post) => {
       const destination = postAsDestination(post);
-      const identity = destination ? duplicateIdentity(destination, post.mediaUrl) : null;
+      const identity = destination ? duplicateIdentity(destination, post.mediaUrl, post.mediaUrls) : null;
       if (identity) existingIdentities.set(identity, post);
     });
 
-  candidates.forEach(({ destination, mediaUrl }) => {
-    const identity = duplicateIdentity(destination, mediaUrl);
+  candidates.forEach(({ destination, mediaUrl, mediaUrls }) => {
+    const identity = duplicateIdentity(destination, mediaUrl, mediaUrls);
     const existing = identity ? existingIdentities.get(identity) : undefined;
     if (!existing) return;
     conflicts.push({
@@ -273,8 +294,9 @@ export function destinationToPost(
     date: destination.date,
     time: destination.time,
     scheduledAt: validation.scheduledAt,
-    mediaUrl: media?.url || null,
-    cloudinaryPublicId: media?.publicId || null,
+    mediaUrl: media?.items ? null : media?.url || null,
+    ...(media?.items ? { mediaUrls: media.items.map((item) => item.url) } : {}),
+    cloudinaryPublicId: media?.items ? null : media?.publicId || null,
     status: "scheduled",
   };
 }
