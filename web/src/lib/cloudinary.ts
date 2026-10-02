@@ -99,9 +99,11 @@ export async function uploadVideoToCloudinary(
   return {
     secure_url: data.secure_url,
     public_id: data.public_id,
-    resource_type: "video",
+    resource_type: data.resource_type || "video",
     format: data.format || "",
     bytes: data.bytes || file.size,
+    width: data.width,
+    height: data.height,
   };
 }
 
@@ -114,7 +116,7 @@ export const SUPPORTED_IMAGE_TYPES = [
 ];
 
 export const SUPPORTED_VIDEO_TYPES = [
-  "video/mp4", "video/webm", "video/mov", "video/avi"
+  "video/mp4", "video/webm", "video/mov", "video/quicktime", "video/avi", "video/x-msvideo"
 ];
 
 export function getSupportedTypes(): string[] {

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { hasCloudinaryConfig, isImageFile, SUPPORTED_IMAGE_TYPES, uploadMediaFile, validateMediaFile } from "../../lib/cloudinary";
+import { hasCloudinaryConfig, isImageFile, isVideoFile, uploadMediaFile, validateMediaFile } from "../../lib/cloudinary";
 import { useToast } from "../common/Toast";
 import "./MediaUpload.css";
 
-const MAX_IMAGES = 50;
+const MAX_MEDIA = 50;
 const CONCURRENCY = 4;
 type Status = "Ready" | "Uploading" | "Uploaded" | "Failed";
 interface MediaResult {
@@ -79,18 +79,18 @@ export function MediaUpload() {
     let excess = 0;
     for (const file of files) {
       const validation = validateMediaFile(file);
-      if (!validation.valid || !isImageFile(file) || file.size === 0) {
-        errors.push(`${file.name}: ${file.size === 0 ? "File is empty." : !validation.valid ? validation.error : "Images only."}`);
+      if (!validation.valid || (!isImageFile(file) && !isVideoFile(file)) || file.size === 0) {
+        errors.push(`${file.name}: ${file.size === 0 ? "File is empty." : !validation.valid ? validation.error : "Image or video media only."}`);
         continue;
       }
       const id = JSON.stringify([file.name, file.size, file.lastModified]);
       if (identities.has(id)) { duplicates++; continue; }
-      if (next.length >= MAX_IMAGES) { excess++; continue; }
+      if (next.length >= MAX_MEDIA) { excess++; continue; }
       next.push({ id, file, preview: URL.createObjectURL(file), status: "Ready" });
       identities.add(id);
     }
     if (duplicates) errors.push(`${duplicates} duplicate file(s) skipped.`);
-    if (excess) errors.push(`${excess} excess image(s) skipped. Maximum ${MAX_IMAGES} per batch.`);
+    if (excess) errors.push(`${excess} excess media file(s) skipped. Maximum ${MAX_MEDIA} per batch.`);
     updateImages(next);
     setMessages(errors);
   }
@@ -132,7 +132,7 @@ export function MediaUpload() {
           if (!result.secure_url?.startsWith("https://") || !result.public_id || !result.format
             || typeof result.width !== "number" || typeof result.height !== "number"
             || typeof result.bytes !== "number") {
-            throw new Error("Cloudinary returned incomplete image metadata. Please retry.");
+            throw new Error("Cloudinary returned incomplete media metadata. Please retry.");
           }
           patchImage(image.id, { status: "Uploaded", result: {
             fileName: image.file.name, url: result.secure_url, publicId: result.public_id,
@@ -180,7 +180,7 @@ export function MediaUpload() {
   }
 
   return <section className="media-upload" aria-label="Media Upload">
-    <div className="media-heading"><div><h2>Media Upload</h2><p>Upload images to Cloudinary and export their filename-to-URL mapping.</p></div>
+    <div className="media-heading"><div><h2>Media Upload</h2><p>Upload images and videos to Cloudinary and export their filename-to-URL mapping.</p></div>
       <button type="button" className="btn-secondary" disabled={running || !images.length} onClick={resetBatch}>New Batch</button>
     </div>
     <p className="media-help">This batch stays in this tab while you switch sections. Download JSON before refreshing or closing the tab.</p>
@@ -190,38 +190,38 @@ export function MediaUpload() {
     }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = running ? "none" : "copy"; }}
       onDragLeave={(event) => { event.preventDefault(); dragDepth.current = Math.max(0, dragDepth.current - 1); if (!dragDepth.current) setDragging(false); }}
       onDrop={(event) => { event.preventDefault(); dragDepth.current = 0; setDragging(false); addFiles(Array.from(event.dataTransfer.files)); }}>
-      <strong>Drag and drop images here</strong><span>JPEG, PNG, WebP, GIF, BMP · Up to 50 images · 100 MiB per image</span>
-      <button type="button" className="btn-secondary" disabled={running || images.length >= MAX_IMAGES} onClick={() => picker.current?.click()}>Select Images</button>
-      <input ref={picker} type="file" multiple accept={SUPPORTED_IMAGE_TYPES.join(",")} hidden disabled={running} onChange={(event) => {
+      <strong>Drag and drop media here</strong><span>Images: JPEG, PNG, WebP, GIF, BMP · Videos: MP4, WebM, MOV, AVI · Up to 50 media files · 100 MiB per file</span>
+      <button type="button" className="btn-secondary" disabled={running || images.length >= MAX_MEDIA} onClick={() => picker.current?.click()}>Select Media</button>
+      <input ref={picker} type="file" multiple accept="image/*,video/*" hidden disabled={running} onChange={(event) => {
         addFiles(Array.from(event.target.files || [])); event.target.value = "";
       }} />
     </div>
     {messages.length > 0 && <div className="media-validation" role="alert"><strong>Some files were skipped</strong><ul>{messages.map((message, index) => <li key={index}>{message}</li>)}</ul></div>}
-    <div className="media-actions"><h3>Selected Images <span>{images.length} / 50</span></h3>
+    <div className="media-actions"><h3>Selected Media <span>{images.length} / 50</span></h3>
       <button type="button" className="btn-secondary" disabled={running || !images.length} onClick={resetBatch}>Clear All</button>
     </div>
-    {!images.length ? <p className="media-empty">Select images to preview them before uploading.</p> : <ul className="media-selected">{images.map((image) => <li key={image.id}>
-      <img src={image.preview} alt={`Preview of ${image.file.name}`} loading="lazy" />
-      <div className="media-file"><strong title={image.file.name}>{image.file.name}</strong><span>{image.file.size < 1024 * 1024 ? `${(image.file.size / 1024).toFixed(1)} KiB` : `${(image.file.size / 1024 / 1024).toFixed(1)} MiB`}</span>
+    {!images.length ? <p className="media-empty">Select media to preview it before uploading.</p> : <ul className="media-selected">{images.map((image) => <li key={image.id}>
+      {isVideoFile(image.file) ? <video src={image.preview} controls preload="metadata" playsInline aria-label={`Video preview of ${image.file.name}`} /> : <img src={image.preview} alt={`Preview of ${image.file.name}`} loading="lazy" />}
+      <div className="media-file"><strong title={image.file.name}>{image.file.name}</strong><span>{isVideoFile(image.file) ? "Video" : "Image"} · {image.file.size < 1024 * 1024 ? `${(image.file.size / 1024).toFixed(1)} KiB` : `${(image.file.size / 1024 / 1024).toFixed(1)} MiB`}</span>
         {image.error && <small className="media-error">{image.error}</small>}</div>
       <span className={`media-status is-${image.status.toLowerCase()}`}>{image.status}</span>
       {image.status === "Ready" && <button type="button" className="btn-secondary btn-mini" disabled={running} aria-label={`Remove ${image.file.name}`} onClick={() => removeImage(image.id)}>Remove</button>}
     </li>)}</ul>}
     <div className="media-actions">
-      <button type="button" className="btn-primary" disabled={running || !ready || !configured} onClick={() => void upload("Ready")}>Upload Images{ready > 0 ? ` (${ready})` : ""}</button>
+      <button type="button" className="btn-primary" disabled={running || !ready || !configured} onClick={() => void upload("Ready")}>Upload Media{ready > 0 ? ` (${ready})` : ""}</button>
       <button type="button" className="btn-secondary" disabled={running || !failed || !configured} onClick={() => void upload("Failed")}>Retry Failed{failed > 0 ? ` (${failed})` : ""}</button>
-      <span className="media-help" role="status">{progress.total > 0 ? `${running ? "Uploading" : "Completed"} ${progress.completed} / ${progress.total} · ${media.length} uploaded · ${failed} failed` : "Four images upload at a time."}</span>
+      <span className="media-help" role="status">{progress.total > 0 ? `${running ? "Uploading" : "Completed"} ${progress.completed} / ${progress.total} · ${media.length} uploaded · ${failed} failed` : "Four media files upload at a time."}</span>
     </div>
     {progress.total > 0 && <progress className="media-progress" value={progress.completed} max={progress.total} aria-label="Completed upload attempts" />}
     {progress.total > 0 && <section className="media-results"><h3>Upload Results</h3><div className="media-table-wrap"><table>
-      <colgroup><col style={{ width: 80 }} /><col style={{ width: "26%" }} /><col style={{ width: 100 }} /><col /><col style={{ width: 110 }} /></colgroup>
+      <colgroup><col style={{ width: 116 }} /><col style={{ width: "26%" }} /><col style={{ width: 100 }} /><col /><col style={{ width: 110 }} /></colgroup>
       <thead><tr><th>Preview</th><th>Filename</th><th>Status</th><th>Cloudinary URL</th><th>Copy</th></tr></thead>
-      <tbody>{images.map((image) => <tr key={image.id}><td><img src={image.preview} alt="" loading="lazy" /></td>
-        <td><span className="media-truncate" title={image.file.name}>{image.file.name}</span></td><td><span className={`media-status is-${image.status.toLowerCase()}`}>{image.status}</span></td>
+      <tbody>{images.map((image) => <tr key={image.id}><td>{isVideoFile(image.file) ? <video src={image.preview} controls preload="none" playsInline aria-label={`Video preview of ${image.file.name}`} /> : <img src={image.preview} alt="" loading="lazy" />}</td>
+        <td><span className="media-truncate" title={image.file.name}>{image.file.name}</span><span className="media-help">{isVideoFile(image.file) ? "Video" : "Image"}</span></td><td><span className={`media-status is-${image.status.toLowerCase()}`}>{image.status}</span></td>
         <td>{image.result ? <a className="media-truncate" href={image.result.url} title={image.result.url} target="_blank" rel="noopener noreferrer">{image.result.url}</a> : <span className={image.error ? "media-error" : "media-help"}>{image.error || "—"}</span>}</td>
         <td><button type="button" className="btn-secondary btn-mini" disabled={!image.result} onClick={() => image.result && void copy(image.result.url)}>Copy URL</button></td></tr>)}</tbody>
     </table></div></section>}
-    <section className="media-output"><div className="media-actions"><h3>JSON Output <span>{media.length} image{media.length === 1 ? "" : "s"}</span></h3>
+    <section className="media-output"><div className="media-actions"><h3>JSON Output <span>{media.length} media file{media.length === 1 ? "" : "s"}</span></h3>
       <button type="button" className="btn-secondary" disabled={!media.length} onClick={() => void copy(json)}>Copy JSON</button>
       <button type="button" className="btn-secondary" disabled={!media.length} onClick={downloadJson}>Download JSON</button>
     </div><pre tabIndex={0} aria-label="Generated media JSON"><code>{json}</code></pre></section>

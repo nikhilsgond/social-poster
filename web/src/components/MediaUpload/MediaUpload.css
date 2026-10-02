@@ -15,6 +15,7 @@
 .media-selected { list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 8px; padding: 0; margin: 0; }
 .media-selected li { display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
 .media-selected img, .media-results img { width: 48px; height: 48px; flex-shrink: 0; object-fit: cover; border-radius: 6px; background: var(--panel-alt); }
+.media-selected video, .media-results video { width: 96px; height: 64px; flex-shrink: 0; object-fit: contain; border-radius: 6px; background: var(--panel-alt); }
 .media-file { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }
 .media-file strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem; }
 .media-file span { color: var(--muted); font-size: .72rem; }
