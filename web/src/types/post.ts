@@ -46,10 +46,10 @@ export type Post = {
   errorMessage?: string | null;
   attempts?: number;
   publishedAt?: string | null;
-  views?: number;
-  likes?: number;
-  comments?: number;
-  shares?: number;        // From snapshots (latest), not in posts table
+  views?: number | null;
+  likes?: number | null;
+  comments?: number | null;
+  shares?: number | null;        // Current metric on posts
   metricsUpdatedAt?: string | null;
   sourceId?: string | null;
   permalink?: string | null;

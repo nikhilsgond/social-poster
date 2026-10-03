@@ -3,10 +3,10 @@ import type { Post } from "../types";
 export type MetricsSyncPlatform = "ig" | "th" | "fb" | "yt";
 
 export interface FetchedMetrics {
-  views?: number;
-  likes?: number;
-  comments?: number;
-  shares?: number;
+  views?: number | null;
+  likes?: number | null;
+  comments?: number | null;
+  shares?: number | null;
   platformMetrics?: Record<string, unknown>;
 }
 

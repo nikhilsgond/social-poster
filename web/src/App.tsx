@@ -10,16 +10,16 @@ import { PlatformIcon, platformDataMap } from "./components/common/PlatformIcon"
 import { Calendar } from "./components/Calendar/Calendar";
 import type { CalendarMonthSyncState, CalendarPlatformSyncState, CalendarSyncRequest } from "./components/Calendar/Calendar";
 import { Tables, getFilteredSortedPosts } from "./components/Tables/Tables";
-import { Metrics } from "./components/Metrics/Metrics";
+import { Analysis } from "./components/Analysis/Analysis";
 import { MediaUpload } from "./components/MediaUpload/MediaUpload";
 import { CreatePostWorkflow } from "./components/CreatePost/CreatePostWorkflow";
 import { StrategyWorkflow } from "./components/CreatePost/StrategyWorkflow";
 import { BulkImportModal } from "./components/BulkImport/BulkImportModal";
 import { ReuseSchedulerModal } from "./components/ReuseScheduler/ReuseSchedulerModal";
 import { CONTENT_TYPES, isPublishingPlatform } from "./lib/contentTypes";
-import type { Platform, Post, PostStatus, MetricSnapshot, DateRange, DateRangeType } from "./types/post";
-import { useDateRange, useSnapshots, useEnrichedPosts } from "./hooks/usePosts";
-import { formatTimestamp, metricNumber, formatMetric, escapeHtml } from "./lib/metrics";
+import type { Platform, Post, PostStatus } from "./types/post";
+import { usePostSnapshots } from "./hooks/usePosts";
+import { latestSnapshotsByPost, formatTimestamp, metricNumber, formatMetric, escapeHtml } from "./lib/metrics";
 import { syncMetrics } from "./lib/backend";
 import type { MetricsSyncPlatform } from "./lib/backend";
 import { exportRecordsToCSV, filterPostsForExport, toExportRecords } from "./lib/exportPosts";
@@ -38,8 +38,7 @@ function loadUrlState(): Partial<{
   view: View; year: number; month: number; tableTab: string; tableSearch: string;
   tableContentType: string; tableStatus: string; tableSort: string; tableSortDir: string;
   tablePage: number;
-  metricsTab: string; analysisMetric: string; analysisDimension: string; editPostId: string;
-  dateRange: string; customStart: string; customEnd: string;
+  editPostId: string;
 }> {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -54,13 +53,7 @@ function loadUrlState(): Partial<{
       tableSort: params.get("sort") || "date",
       tableSortDir: params.get("dir") || "asc",
       tablePage: Number(params.get("page")) || 1,
-      metricsTab: params.get("metrics") || "all",
-      analysisMetric: params.get("metric") || "views",
-      analysisDimension: params.get("dimension") || "contentType",
       editPostId: params.get("edit") || "",
-      dateRange: params.get("range") || "30d",
-      customStart: params.get("start") || "",
-      customEnd: params.get("end") || "",
     };
   } catch { return {}; }
 }
@@ -108,25 +101,9 @@ function AppContent() {
   const [tableSort, setTableSort] = useState(() => loadUrlState().tableSort || "date");
   const [tableSortDir, setTableSortDir] = useState(() => loadUrlState().tableSortDir || "asc");
 
-  // ── Metrics state ──
-  const [metricsTab, setMetricsTab] = useState<Platform | "all">(() => (loadUrlState().metricsTab as Platform | "all") || "all");
-  const [analysisMetric, setAnalysisMetric] = useState(() => loadUrlState().analysisMetric || "views");
-  const [analysisDimension, setAnalysisDimension] = useState(() => loadUrlState().analysisDimension || "contentType");
-
-  // ── Analytics Date Range state ──
-  const urlState = loadUrlState();
-  const initialRangeType = (urlState.dateRange as DateRangeType) || "30d";
-  const { type: dateRangeType, setType: setDateRangeType, customStart, customEnd, setCustomStart, setCustomEnd, range: dateRange } = useDateRange(initialRangeType);
-  // Sync customStart/customEnd from URL if present
-  useEffect(() => {
-    if (urlState.customStart) setCustomStart(urlState.customStart);
-    if (urlState.customEnd) setCustomEnd(urlState.customEnd);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  // ── Analytics snapshots ──
-  const { snapshots, loading: snapshotLoading, error: snapshotError, latestMap, reload: reloadSnapshots } = useSnapshots(dateRange);
-  // Enrich posts with latest snapshot data (e.g. shares)
-  const { posts: enrichedPosts } = useEnrichedPosts(snapshots);
+  // Snapshot history is fetched only for an open post detail, never for Analysis.
+  const { snapshots } = usePostSnapshots(view === "metrics" ? null : editPostId || null);
+  const latestMap = latestSnapshotsByPost(snapshots);
   const [monthSync, setMonthSync] = useState<CalendarMonthSyncState>({
     running: false,
     monthLabel: "",
@@ -240,7 +217,7 @@ function AppContent() {
     const refreshResults = await Promise.allSettled([refreshPosts({
       platforms: requestedPlatforms, startDate, endDateExclusive,
       startTime: start?.toISOString(), endTimeExclusive: end?.toISOString(),
-    }), reloadSnapshots()]);
+    })]);
     setMonthSync((current) => ({ ...current, running: false }));
     const refreshFailed = refreshResults.some((result) => result.status === "rejected");
     const completed = Object.values(completedResults);
@@ -256,7 +233,7 @@ function AppContent() {
           : `${monthLabel} metrics were synchronized for ${syncTarget}.`,
       refreshFailed || attentionPlatforms > 0 ? "warning" : "success",
     );
-  }, [monthSync.running, refreshPosts, reloadSnapshots, showToast]);
+  }, [monthSync.running, refreshPosts, showToast]);
 
   // ── Table pagination state ──
   const [tablePageSize] = useState(15);
@@ -306,12 +283,9 @@ function AppContent() {
     syncUrlState({
       view, year: currentMonth.year, month: currentMonth.month,
       tableTab, tableSearch, tableContentType, tableStatus, tableSort, tableSortDir, tablePage,
-      metricsTab, analysisMetric, analysisDimension, selectionMode: selectionMode || undefined,
-      dateRange: dateRangeType,
-      customStart: dateRangeType === "custom" && customStart ? customStart : undefined,
-      customEnd: dateRangeType === "custom" && customEnd ? customEnd : undefined,
+      selectionMode: selectionMode || undefined,
     });
-  }, [view, currentMonth, tableTab, tableSearch, tableContentType, tableStatus, tableSort, tableSortDir, tablePage, metricsTab, analysisMetric, analysisDimension, selectionMode, dateRangeType, customStart, customEnd]);
+  }, [view, currentMonth, tableTab, tableSearch, tableContentType, tableStatus, tableSort, tableSortDir, tablePage, selectionMode]);
 
   useEffect(() => { syncUrl(); }, [syncUrl]);
 
@@ -327,12 +301,6 @@ function AppContent() {
     if (urlState.tableSort) setTableSort(urlState.tableSort);
     if (urlState.tableSortDir) setTableSortDir(urlState.tableSortDir);
     if (urlState.tablePage) setTablePage(urlState.tablePage);
-    if (urlState.metricsTab) setMetricsTab(urlState.metricsTab as Platform | "all");
-    if (urlState.analysisMetric) setAnalysisMetric(urlState.analysisMetric);
-    if (urlState.analysisDimension) setAnalysisDimension(urlState.analysisDimension);
-    if (urlState.dateRange) setDateRangeType(urlState.dateRange as DateRangeType);
-    if (urlState.customStart) setCustomStart(urlState.customStart);
-    if (urlState.customEnd) setCustomEnd(urlState.customEnd);
     if (urlState.editPostId) {
       const post = posts.find((p) => p.id === urlState.editPostId);
       if (post) openEditModal(post);
@@ -696,7 +664,7 @@ function AppContent() {
         <nav className="view-nav">
           {(["calendar", "tables", "metrics", "media-upload"] as View[]).map((item) => (
             <button key={item} type="button" className={view === item ? "active" : ""} onClick={() => switchView(item)}>
-              {item === "media-upload" ? "Media Upload" : item.charAt(0).toUpperCase() + item.slice(1)}
+              {item === "metrics" ? "Analysis" : item === "media-upload" ? "Media Upload" : item.charAt(0).toUpperCase() + item.slice(1)}
             </button>
           ))}
         </nav>
@@ -763,28 +731,7 @@ function AppContent() {
 
           {/* ── Metrics View ── */}
           {view === "metrics" && !loading && (
-            <Metrics
-              metricsTab={metricsTab}
-              onTabChange={(tab: string) => setMetricsTab(tab as any)}
-              posts={enrichedPosts}
-              analysisMetric={analysisMetric}
-              onAnalysisMetricChange={setAnalysisMetric}
-              analysisDimension={analysisDimension}
-              onAnalysisDimensionChange={setAnalysisDimension}
-              // Date range props
-              dateRange={dateRange}
-              dateRangeType={dateRangeType}
-              onDateRangeTypeChange={setDateRangeType}
-              customStartDate={customStart}
-              customEndDate={customEnd}
-              onCustomStartDateChange={setCustomStart}
-              onCustomEndDateChange={setCustomEnd}
-              // Snapshot props
-              snapshots={snapshots}
-              snapshotLoading={snapshotLoading}
-              snapshotError={snapshotError}
-
-            />
+            <Analysis posts={posts} />
           )}
         </div>
       </main>
@@ -936,9 +883,9 @@ function AppContent() {
                         <div className="detail-item-head"><span>Current metrics</span></div>
                         <div className="detail-fields">
                           <div className="detail-field"><b>Views:</b> {formatMetric(metricNumber(post, "views"))}</div>
-                          <div className="detail-field"><b>Likes:</b> {formatMetric(metricNumber(post, "likes"))}</div>
+                          <div className="detail-field"><b>{post.platform === "fb" ? "Reactions" : "Likes"}:</b> {formatMetric(metricNumber(post, "likes"))}</div>
                           <div className="detail-field"><b>Comments:</b> {formatMetric(metricNumber(post, "comments"))}</div>
-                          <div className="detail-field"><b>Shares:</b> {latestSnap ? formatMetric(latestSnap.shares) : "—"}</div>
+                          <div className="detail-field"><b>Shares:</b> {post.shares == null ? "N/A" : formatMetric(post.shares)}</div>
                           <div className="detail-field"><b>Last updated:</b> {formatTimestamp(post.metricsUpdatedAt)}</div>
                         </div>
                       </div>

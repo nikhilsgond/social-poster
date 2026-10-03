@@ -7,7 +7,7 @@ import { supabase } from "./supabase";
 import type { Post, MetricSnapshot, DateRange, Platform } from "../types/post";
 import { buildScheduledAt, normalizePost } from "./validation";
 
-const POST_SELECTION = "*,latest_metrics:post_metric_snapshots(shares,captured_at)";
+const POST_SELECTION = "*";
 
 // ── Date Range Helpers ──
 export function computeDateRange(type: "7d" | "30d" | "90d" | "custom", startDate?: string, endDate?: string): DateRange {
@@ -95,16 +95,16 @@ function dbRowToPost(row: any): Post {
     errorMessage: row.error_message,
     attempts: row.attempts,
     publishedAt: row.published_at,
-    views: row.views ?? 0,
-    likes: row.likes ?? 0,
-    comments: row.comments ?? 0,
+    views: row.views ?? null,
+    likes: row.likes ?? null,
+    comments: row.comments ?? null,
     metricsUpdatedAt: row.metrics_updated_at,
     sourceId: row.source_id,
     permalink: row.permalink,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }), metricsUpdatedAt: row.metrics_updated_at,
-    shares: row.latest_metrics?.[0]?.shares ?? row.shares ?? 0,
+    shares: row.platform === "yt" ? null : row.shares ?? null,
   };
 }
 
@@ -140,9 +140,10 @@ function postToDbRow(post: Post | Omit<Post, "id" | "createdAt" | "updatedAt">):
     error_message: post.errorMessage ?? null,
     attempts: post.attempts ?? 0,
     published_at: post.publishedAt ? new Date(post.publishedAt).toISOString() : null,
-    views: post.views ?? 0,
-    likes: post.likes ?? 0,
-    comments: post.comments ?? 0,
+    views: post.views ?? null,
+    likes: post.likes ?? null,
+    comments: post.comments ?? null,
+    shares: post.platform === "yt" ? null : post.shares ?? null,
     metrics_updated_at: post.metricsUpdatedAt ? new Date(post.metricsUpdatedAt).toISOString() : null,
     source_id: post.sourceId ?? null,
     permalink: post.permalink ?? null,
@@ -164,7 +165,7 @@ function postChangesToDbRow(changes: Partial<Post>): Record<string, unknown> {
     ["status", "status"], ["platformPostId", "platform_post_id"],
     ["errorMessage", "error_message"], ["attempts", "attempts"],
     ["publishedAt", "published_at"], ["views", "views"], ["likes", "likes"],
-    ["comments", "comments"], ["metricsUpdatedAt", "metrics_updated_at"],
+    ["comments", "comments"], ["shares", "shares"], ["metricsUpdatedAt", "metrics_updated_at"],
     ["sourceId", "source_id"], ["permalink", "permalink"],
   ];
   for (const [key, column] of mappings) {
@@ -215,8 +216,6 @@ export async function fetchPosts(options: PostsFetchOptions = {}): Promise<Post[
     let query = supabase
       .from("posts")
       .select(POST_SELECTION)
-      .order("captured_at", { referencedTable: "latest_metrics", ascending: false })
-      .limit(1, { referencedTable: "latest_metrics" })
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
       .range(offset, offset + pageSize - 1);
@@ -246,36 +245,28 @@ export async function fetchPosts(options: PostsFetchOptions = {}): Promise<Post[
 }
 
 export async function fetchPost(id: string): Promise<Post | null> {
-  const { data, error } = await supabase.from("posts").select(POST_SELECTION).eq("id", id)
-    .order("captured_at", { referencedTable: "latest_metrics", ascending: false })
-    .limit(1, { referencedTable: "latest_metrics" }).single();
+  const { data, error } = await supabase.from("posts").select(POST_SELECTION).eq("id", id).single();
   if (error) return null;
   return dbRowToPost(data);
 }
 
 export async function createPost(post: Omit<Post, "id" | "createdAt" | "updatedAt">): Promise<Post> {
   const row = postToDbRow(post);
-  const { data, error } = await supabase.from("posts").insert(row).select(POST_SELECTION)
-    .order("captured_at", { referencedTable: "latest_metrics", ascending: false })
-    .limit(1, { referencedTable: "latest_metrics" }).single();
+  const { data, error } = await supabase.from("posts").insert(row).select(POST_SELECTION).single();
   if (error) throw error;
   return dbRowToPost(data);
 }
 
 export async function createPosts(posts: Omit<Post, "id" | "createdAt" | "updatedAt">[]): Promise<Post[]> {
   const rows = posts.map(postToDbRow);
-  const { data, error } = await supabase.from("posts").insert(rows).select(POST_SELECTION)
-    .order("captured_at", { referencedTable: "latest_metrics", ascending: false })
-    .limit(1, { referencedTable: "latest_metrics" });
+  const { data, error } = await supabase.from("posts").insert(rows).select(POST_SELECTION);
   if (error) throw error;
   return (data || []).map(dbRowToPost);
 }
 
 export async function updatePost(id: string, changes: Partial<Post>): Promise<Post | null> {
   const row = postChangesToDbRow(changes);
-  const { data, error } = await supabase.from("posts").update(row).eq("id", id).select(POST_SELECTION)
-    .order("captured_at", { referencedTable: "latest_metrics", ascending: false })
-    .limit(1, { referencedTable: "latest_metrics" }).single();
+  const { data, error } = await supabase.from("posts").update(row).eq("id", id).select(POST_SELECTION).single();
   if (error) throw error;
   return dbRowToPost(data);
 }
@@ -301,8 +292,6 @@ export async function movePost(id: string, newDate: string): Promise<Post | null
     })
     .eq("id", id)
     .select(POST_SELECTION)
-    .order("captured_at", { referencedTable: "latest_metrics", ascending: false })
-    .limit(1, { referencedTable: "latest_metrics" })
     .single();
   if (error) throw error;
   return dbRowToPost(data);

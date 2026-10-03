@@ -148,7 +148,7 @@ test("repository pagination and incremental/scoped filters preserve metadata", a
   const queries = [];
   const rows = Array.from({ length: 1103 }, (_, i) => ({ id: String(i), platform: "ig", status: "published", content_type: "Image",
     date: "2025-01-01", time: "10:00", updated_at: "2026-10-02T00:00:00.000Z", metrics_updated_at: "2026-10-02T01:00:00.000Z",
-    latest_metrics: [{ shares: 19 }], views: 60 }));
+    shares: 19, views: 60 }));
   const supabase = { from(table) {
     const query = { table, filters: [] };
     queries.push(query);

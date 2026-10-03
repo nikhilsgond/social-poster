@@ -1,6 +1,6 @@
 import type { Post } from "../types/post";
 
-export const POSTS_CACHE_VERSION = 1;
+export const POSTS_CACHE_VERSION = 2;
 const source = import.meta.env.VITE_SUPABASE_URL;
 const DATABASE = `social-planner-posts-cache:${source}`;
 const POSTS = "publishedPosts";

@@ -48,9 +48,9 @@ export function normalizePost(p: any): Post {
   // Ensure flat metric fields are present
   if (post.views === undefined && post.likes === undefined && post.comments === undefined) {
     const m = post.metrics || {};
-    post.views = m.views ?? 0;
-    post.likes = m.likes ?? 0;
-    post.comments = m.comments ?? 0;
+    post.views = m.views ?? null;
+    post.likes = m.likes ?? null;
+    post.comments = m.comments ?? null;
   }
   // Remove the nested metrics object — Post type uses flat fields
   delete post.metrics;

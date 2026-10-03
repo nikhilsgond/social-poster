@@ -6,21 +6,8 @@
 // Authentication: Uses the existing Page Access Token (META_PAGE_ACCESS_TOKEN)
 // with read_insights + pages_read_engagement permissions.
 //
-// Mapping:
-//   post_reactions_like_total         → likes
-//   post_impressions                  → views (note: impressions deprecated in v25+,
-//                                        replaced by views for new Page Experience)
-//   post_story_shares                 → shares
-//   Comments retrieved separately via GET /{post-id}?fields=comments
-//
-// Facebook-specific metrics (reactions breakdown, engaged_users, video metrics,
-// click metrics) are stored in platformMetrics JSONB.
-//
-// IMPORTANT: Some Page Insights metrics are deprecated as of June 15, 2026
-// (impressions → replaced by views; page_fans deprecated). We use post-level
-// metrics only, not deprecated page-level metrics.
-//
-// Part of Phase 1: Metrics Synchronization.
+// Current views come from post_media_view. Discovery fetches all reactions,
+// comments and shares; no reaction-type breakdown is requested.
 
 import type { Post } from "../../types";
 import type { MetricProvider, MetricResult, FetchedMetrics, MetricsSyncScope, DiscoveryResult, DiscoveredPost } from "../interface";
@@ -39,103 +26,16 @@ const FB_INSIGHT_METRICS = [
 const FB_VIDEO_METRICS: string[] = [];
 
 // ── Map Facebook API metric names to our common field names ──
-function mapFacebookMetrics(
-  data: any[],
-  contentType: string | undefined
-): FetchedMetrics {
-  const result: FetchedMetrics = {};
-  const platformMetrics: Record<string, unknown> = {};
+export function mapFacebookMetrics(data: any[], _contentType?: string): FetchedMetrics {
+  const item = data.find(metric => metric.name === "post_media_view");
+  const views = numberMetric(item?.values?.[0]?.value);
+  return { views, platformMetrics: views !== undefined ? { mediaViews: views } : {} };
+}
 
-  for (const item of data) {
-    const name = item.name;
-    const value = item.values?.[0]?.value;
-
-    if (value === undefined || value === null) continue;
-
-    const numValue = typeof value === "number" ? value : Number(value);
-
-    switch (name) {
-      case "post_reactions_like_total":
-        result.likes = numValue;
-        break;
-      case "post_impressions":
-        // Note: post_impressions is deprecated in v25+ but still works for post-level.
-        // For new Page Experience, post_views is preferred but may not be available.
-        // We map impressions to views as a fallback, and also store impressions separately.
-        result.views = numValue;
-        platformMetrics.postImpressions = numValue;
-        break;
-      case "post_media_view":
-        result.views = numValue;
-        platformMetrics.mediaViews = numValue;
-        break;
-      case "post_impressions_unique":
-        platformMetrics.postImpressionsUnique = numValue;
-        break;
-      case "post_story_shares":
-        result.shares = numValue;
-        break;
-      case "post_engaged_users":
-        platformMetrics.engagedUsers = numValue;
-        break;
-      case "post_clicks":
-        platformMetrics.clicks = numValue;
-        break;
-      case "post_negative_feedback":
-        platformMetrics.negativeFeedback = numValue;
-        break;
-      // Reaction breakdowns
-      case "post_reactions_love_total":
-        platformMetrics.reactionsLove = numValue;
-        break;
-      case "post_reactions_wow_total":
-        platformMetrics.reactionsWow = numValue;
-        break;
-      case "post_reactions_haha_total":
-        platformMetrics.reactionsHaha = numValue;
-        break;
-      case "post_reactions_sad_total":
-        platformMetrics.reactionsSad = numValue;
-        break;
-      case "post_reactions_angry_total":
-        platformMetrics.reactionsAngry = numValue;
-        break;
-      case "post_reactions_thankful_total":
-        platformMetrics.reactionsThankful = numValue;
-        break;
-      case "post_reactions_care_total":
-        platformMetrics.reactionsCare = numValue;
-        break;
-      // Video metrics (if applicable)
-      case "post_video_views":
-        platformMetrics.videoViews = numValue;
-        break;
-      case "post_video_unique_views":
-        platformMetrics.videoUniqueViews = numValue;
-        break;
-      case "post_video_avg_time_watched_actions":
-        platformMetrics.videoAvgWatchTime = numValue;
-        break;
-      case "post_video_complete_views":
-        platformMetrics.videoCompleteViews = numValue;
-        break;
-      case "post_video_view_time":
-        platformMetrics.videoViewTime = numValue;
-        break;
-      default:
-        platformMetrics[name] = numValue;
-        break;
-    }
-  }
-
-  // Also store the content type for context
-  platformMetrics.contentType = contentType;
-
-  if (Object.keys(platformMetrics).length > 0) {
-    result.platformMetrics = platformMetrics;
-  }
-
-  return result;
+export function mapFacebookPostCounts(item: any): FetchedMetrics {
+  return { likes: numberMetric(item.reactions?.summary?.total_count),
+    comments: numberMetric(item.comments?.summary?.total_count),
+    shares: numberMetric(item.shares?.count) };
 }
 
 function isFacebookVideoContentType(contentType: string | undefined): boolean {
@@ -263,7 +163,7 @@ export class FacebookMetricsProvider implements MetricProvider {
 
   async discoverPosts(scope: MetricsSyncScope, onBatch?: (posts: DiscoveredPost[]) => Promise<void>): Promise<DiscoveryResult> {
     const params = new URLSearchParams({
-      fields: "id,message,created_time,permalink_url,full_picture,attachments{media_type,type,media,url,subattachments{media_type,type,media,url}},shares,comments.limit(0).summary(true),reactions.type(LIKE).limit(0).summary(true)",
+      fields: "id,message,created_time,permalink_url,full_picture,attachments{media_type,type,media,url,subattachments{media_type,type,media,url}},shares,comments.limit(0).summary(true),reactions.limit(0).summary(true)",
       limit: "100",
       access_token: this.pageAccessToken,
     });
@@ -301,11 +201,7 @@ export class FacebookMetricsProvider implements MetricProvider {
             content: item.message || undefined,
             mediaUrl: facebookMediaUrl(item),
             permalink: item.permalink_url || undefined,
-            metrics: {
-              likes: numberMetric(item.reactions?.summary?.total_count),
-              comments: numberMetric(item.comments?.summary?.total_count),
-              shares: numberMetric(item.shares?.count),
-            },
+            metrics: mapFacebookPostCounts(item),
           });
         }
         if (onBatch && pagePosts.length) await onBatch(pagePosts);
@@ -393,10 +289,11 @@ export class FacebookMetricsProvider implements MetricProvider {
       }
 
       const mapped = mapFacebookMetrics(fbData.data, contentType);
+      mapped.views = mapped.views ?? null;
 
       // Try to fetch comment count separately if not already included
       // The insights endpoint may not include comment count for all post types
-      let commentCount: number | undefined;
+      let commentCount: number | null | undefined;
 
       try {
         if (knownMetrics?.comments !== undefined) {
@@ -434,7 +331,7 @@ export class FacebookMetricsProvider implements MetricProvider {
         success: true,
         platformPostId,
         postId: id,
-        metrics: mapped,
+        metrics: { ...mapped, likes: knownMetrics?.likes ?? mapped.likes ?? null, comments: knownMetrics?.comments ?? mapped.comments ?? null, shares: knownMetrics?.shares ?? mapped.shares ?? null },
       };
     } catch (err: any) {
       // Detect permission errors

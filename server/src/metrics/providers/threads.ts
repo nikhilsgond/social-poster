@@ -33,7 +33,7 @@ const THREADS_METRICS = [
 
 // ── Map Threads API metric names to our common field names ──
 function mapThreadsMetrics(data: any[]): FetchedMetrics {
-  const result: FetchedMetrics = {};
+  const result: FetchedMetrics = { views: null, likes: null, comments: null, shares: null };
 
   for (const item of data) {
     const name = item.name;

@@ -29,9 +29,10 @@ export interface Post {
   errorMessage?: string | null;
   attempts?: number;
   publishedAt?: string | null;
-  views?: number;
-  likes?: number;
-  comments?: number;
+  views?: number | null;
+  likes?: number | null;
+  comments?: number | null;
+  shares?: number | null;
   metricsUpdatedAt?: string | null;
   sourceId?: string | null;
   permalink?: string | null;

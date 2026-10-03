@@ -366,7 +366,7 @@ export class InstagramMetricsProvider implements MetricProvider {
         success: true,
         platformPostId,
         postId: id,
-        metrics: mapped,
+        metrics: { ...mapped, views: mapped.views ?? null, shares: mapped.shares ?? null, likes: mapped.likes ?? knownMetrics?.likes ?? null, comments: mapped.comments ?? knownMetrics?.comments ?? null },
       };
     } catch (err: any) {
       logError(`Instagram metrics fetch exception`, {

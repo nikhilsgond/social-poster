@@ -97,9 +97,10 @@ export class YouTubeMetricsProvider implements MetricProvider {
               mediaUrl: thumbnail || undefined,
               permalink: `https://www.youtube.com/watch?v=${encodeURIComponent(item.id)}`,
               metrics: {
-                views: numberMetric(item.statistics?.viewCount),
-                likes: numberMetric(item.statistics?.likeCount),
-                comments: numberMetric(item.statistics?.commentCount),
+                views: numberMetric(item.statistics?.viewCount) ?? null,
+                likes: numberMetric(item.statistics?.likeCount) ?? null,
+                comments: numberMetric(item.statistics?.commentCount) ?? null,
+          shares: null,
               },
               metricsComplete: true,
             });
@@ -132,9 +133,10 @@ export class YouTubeMetricsProvider implements MetricProvider {
         platformPostId,
         postId: post.id,
         metrics: {
-          views: numberMetric(item.statistics?.viewCount),
-          likes: numberMetric(item.statistics?.likeCount),
-          comments: numberMetric(item.statistics?.commentCount),
+          views: numberMetric(item.statistics?.viewCount) ?? null,
+          likes: numberMetric(item.statistics?.likeCount) ?? null,
+          comments: numberMetric(item.statistics?.commentCount) ?? null,
+                shares: null,
         },
       };
     } catch (err: any) {

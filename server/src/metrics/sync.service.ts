@@ -10,6 +10,7 @@ import type {
   PlatformSyncResult,
   SyncReport,
 } from "./interface";
+import { currentMetrics } from "./current";
 import { mergeMetrics } from "./providers/shared";
 import { dedupeDiscoveredPosts } from "./identity";
 
@@ -43,9 +44,10 @@ function normalizedPost(row: any): Post {
     status: row.status,
     platformPostId: row.platform_post_id ?? null,
     publishedAt: row.published_at ?? null,
-    views: Number(row.views) || 0,
-    likes: Number(row.likes) || 0,
-    comments: Number(row.comments) || 0,
+    views: row.views ?? null,
+    likes: row.likes ?? null,
+    comments: row.comments ?? null,
+    shares: row.shares ?? null,
     metricsUpdatedAt: row.metrics_updated_at ?? null,
     permalink: row.permalink ?? null,
     createdAt: row.created_at,
@@ -92,15 +94,15 @@ function metadataRow(item: DiscoveredPost, timeZone: string): Record<string, unk
   return row;
 }
 
-async function upsertSnapshot(postId: string, platform: MetricsSyncPlatform, capturedAt: string, metrics: Required<Pick<FetchedMetrics, "views" | "likes" | "comments" | "shares">> & FetchedMetrics): Promise<void> {
+async function upsertSnapshot(postId: string, platform: MetricsSyncPlatform, capturedAt: string, metrics: FetchedMetrics): Promise<void> {
   const snapshot = {
     post_id: postId,
     platform,
     captured_at: capturedAt,
-    views: metrics.views,
-    likes: metrics.likes,
-    comments: metrics.comments,
-    shares: metrics.shares,
+    views: metrics.views ?? 0,
+    likes: metrics.likes ?? 0,
+    comments: metrics.comments ?? 0,
+    shares: metrics.shares ?? 0,
     platform_metrics: metrics.platformMetrics && Object.keys(metrics.platformMetrics).length ? metrics.platformMetrics : null,
   };
   const { error: rpcError } = await supabaseServer.rpc("upsert_metric_snapshot_raw", {
@@ -231,6 +233,7 @@ export class SyncMetricsService {
               continue;
             }
             const insertRow = metadataRow(item, scope.timeZone);
+            Object.assign(insertRow, currentMetrics(platform, item.metrics || {}));
             if (item.metrics?.views !== undefined) insertRow.views = item.metrics.views;
             if (item.metrics?.likes !== undefined) insertRow.likes = item.metrics.likes;
             if (item.metrics?.comments !== undefined) insertRow.comments = item.metrics.comments;
@@ -292,10 +295,7 @@ export class SyncMetricsService {
 
             const prior = latestSnapshots.get(post.id);
             const effective = {
-              views: latestMetrics.views ?? post.views ?? 0,
-              likes: latestMetrics.likes ?? post.likes ?? 0,
-              comments: latestMetrics.comments ?? post.comments ?? 0,
-              shares: latestMetrics.shares ?? prior?.shares ?? 0,
+              ...currentMetrics(platform, latestMetrics, post),
               platformMetrics: {
                 ...(prior?.platformMetrics || {}),
                 ...(latestMetrics.platformMetrics || {}),
@@ -306,6 +306,7 @@ export class SyncMetricsService {
             updateRow.views = effective.views;
             updateRow.likes = effective.likes;
             updateRow.comments = effective.comments;
+            updateRow.shares = effective.shares;
             updateRow.metrics_updated_at = new Date().toISOString();
             const { error: updateError } = await supabaseServer.from("posts").update(updateRow).eq("id", post.id);
             if (updateError) {

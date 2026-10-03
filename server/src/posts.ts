@@ -202,24 +202,24 @@ export async function updateSchedulingResult(
 }
 
 // ── Update current metrics (from sync service) ──
-// Updates ONLY views, likes, comments, and metrics_updated_at.
+// Updates current metrics and metrics_updated_at.
 // Does NOT modify status, platform_post_id, scheduled_at, or published_at.
-// Does NOT add shares to posts (shares goes only in snapshots).
 // Shared with the metrics sync service (Phase 1) and any future metric sources.
 
 export async function updateMetrics(
   id: string,
-  metrics: { views?: number | null; likes?: number | null; comments?: number | null }
+  metrics: { views?: number | null; likes?: number | null; comments?: number | null; shares?: number | null }
 ): Promise<Post | null> {
   try {
-    // Only update fields that are explicitly provided (non-null/non-undefined).
+    // Undefined means no new value; null explicitly marks unavailable metrics.
     // This preserves existing metrics when a provider returns partial or empty data.
     const updateObj: Record<string, unknown> = {
       metrics_updated_at: new Date().toISOString(),
     };
-    if (metrics.views != null) updateObj.views = metrics.views;
-    if (metrics.likes != null) updateObj.likes = metrics.likes;
-    if (metrics.comments != null) updateObj.comments = metrics.comments;
+    if (metrics.views !== undefined) updateObj.views = metrics.views;
+    if (metrics.likes !== undefined) updateObj.likes = metrics.likes;
+    if (metrics.comments !== undefined) updateObj.comments = metrics.comments;
+    if (metrics.shares !== undefined) updateObj.shares = metrics.shares;
 
     const { data, error } = await supabaseServer
       .from("posts")
@@ -260,9 +260,10 @@ function normalizeRow(row: any): Post {
     errorMessage: row.error_message ?? null,
     attempts: row.attempts ?? 0,
     publishedAt: row.published_at ?? null,
-    views: row.views ?? 0,
-    likes: row.likes ?? 0,
-    comments: row.comments ?? 0,
+    views: row.views ?? null,
+    likes: row.likes ?? null,
+    comments: row.comments ?? null,
+    shares: row.shares ?? null,
     metricsUpdatedAt: row.metrics_updated_at ?? null,
     sourceId: row.source_id ?? null,
     permalink: row.permalink ?? null,
