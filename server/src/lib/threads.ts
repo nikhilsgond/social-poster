@@ -22,6 +22,7 @@ export interface ThreadsPublishResult {
   postId?: string | null;
   permalink?: string | null;
   error?: string | null;
+  containerNotReady?: boolean;
 }
 
 export type ThreadsMediaType = "TEXT" | "IMAGE" | "VIDEO";
@@ -37,6 +38,19 @@ export class ThreadsApiError extends Error {
     this.name = "ThreadsApiError";
     this.statusCode = statusCode;
     this.body = body;
+  }
+}
+
+// Only this explicitly classified API failure is safe to retry on the same
+// container. Do not infer readiness from message text or retry arbitrary 400s.
+function isContainerNotReadyError(error: unknown): boolean {
+  if (!(error instanceof ThreadsApiError) || error.statusCode !== 400) return false;
+
+  try {
+    const apiError = JSON.parse(error.body)?.error;
+    return apiError?.code === 24 && apiError?.error_subcode === 4279009;
+  } catch {
+    return false;
   }
 }
 
@@ -141,6 +155,7 @@ export class ThreadsGraphClient {
       return {
         success: false,
         error: err.message || "Threads publish failed",
+        containerNotReady: isContainerNotReadyError(err),
       };
     }
   }

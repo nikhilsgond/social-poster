@@ -9,8 +9,10 @@
 import type { Post } from "../../types";
 import type { PlatformPublisher, PublishResult } from "./interface";
 import { ThreadsGraphClient, type ThreadsMediaType } from "../../lib/threads";
-import { logInfo, logError } from "../../lib/logger";
+import { logInfo, logError, logWarn } from "../../lib/logger";
 import { getContentTypeCapability, validatePlatformPostCapability } from "../../platform-capabilities";
+
+const PUBLISH_RETRY_DELAYS_MS = [5000, 10000, 20000] as const;
 
 // ── Threads media_type mapping ──
 function mapToThreadsMediaType(contentType: string | undefined): ThreadsMediaType {
@@ -63,8 +65,23 @@ export class ThreadsPublisher implements PlatformPublisher {
 
       logInfo(`Threads container created`, { containerId: containerResult.containerId });
 
-      // Step 2: Publish the container
-      const publishResult = await this.client.publishContainer(containerResult.containerId);
+      // Step 2: Publish the existing container. A newly created container may
+      // not yet be visible to the publish endpoint; never recreate it on retry.
+      const containerId = containerResult.containerId;
+      let publishResult = await this.client.publishContainer(containerId);
+
+      for (const [retryIndex, retryInMs] of PUBLISH_RETRY_DELAYS_MS.entries()) {
+        if (publishResult.success || !publishResult.containerNotReady) break;
+
+        logWarn("Threads container not ready; retrying publish", {
+          postId: post.id,
+          containerId,
+          attempt: retryIndex + 1,
+          retryInMs,
+        });
+        await new Promise<void>((resolve) => setTimeout(resolve, retryInMs));
+        publishResult = await this.client.publishContainer(containerId);
+      }
 
       if (publishResult.success) {
         logInfo(`Threads publish successful`, {
