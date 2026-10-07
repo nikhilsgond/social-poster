@@ -13,6 +13,7 @@ import { logInfo, logError, logWarn } from "../../lib/logger";
 import { getContentTypeCapability, validatePlatformPostCapability } from "../../platform-capabilities";
 
 const PUBLISH_RETRY_DELAYS_MS = [5000, 10000, 20000] as const;
+const VIDEO_PUBLISH_RETRY_DELAYS_MS = [20000, 30000, 45000, 60000] as const;
 
 // ── Threads media_type mapping ──
 function mapToThreadsMediaType(contentType: string | undefined): ThreadsMediaType {
@@ -68,12 +69,16 @@ export class ThreadsPublisher implements PlatformPublisher {
       // Step 2: Publish the existing container. A newly created container may
       // not yet be visible to the publish endpoint; never recreate it on retry.
       const containerId = containerResult.containerId;
+      const isVideo = threadsMediaType === "VIDEO";
+      const retryDelays = isVideo ? VIDEO_PUBLISH_RETRY_DELAYS_MS : PUBLISH_RETRY_DELAYS_MS;
       let publishResult = await this.client.publishContainer(containerId);
 
-      for (const [retryIndex, retryInMs] of PUBLISH_RETRY_DELAYS_MS.entries()) {
+      for (const [retryIndex, retryInMs] of retryDelays.entries()) {
         if (publishResult.success || !publishResult.containerNotReady) break;
 
-        logWarn("Threads container not ready; retrying publish", {
+        logWarn(isVideo
+          ? `Threads video container not ready; retrying same container in ${retryInMs / 1000}s (attempt ${retryIndex + 1}/${retryDelays.length})`
+          : "Threads container not ready; retrying publish", {
           postId: post.id,
           containerId,
           attempt: retryIndex + 1,
